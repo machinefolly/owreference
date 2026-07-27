@@ -1,0 +1,494 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import archetypes from '../data/archetypes.json';
+import families from '../data/families.json';
+import { classifyYield } from '../lib/entities';
+
+const base = import.meta.env.BASE_URL;
+
+type Archetype = typeof archetypes[number];
+
+const RATING_TONE: Record<string, string> = {
+  Wisdom:     'yield-science',
+  Charisma:   'yield-civics',
+  Courage:    'yield-training',
+  Discipline: 'yield-orders',
+};
+
+const SLOT_GLYPH: Record<string, string> = {
+  General: '⚔', Governor: '🏛', Agent: '⌬', Leader: '⚜',
+};
+
+// Archetype "section header" emoji for the table
+const ARCHETYPE_GROUP: Record<string, string> = {
+  commander: 'General', hero: 'General', tactician: 'General', zealot: 'General',
+  builder: 'Governor', diplomat: 'Governor', judge: 'Governor', orator: 'Governor', scholar: 'Governor',
+  schemer: 'Spymaster',
+};
+
+// Inverted view of the family classes' aiTraitDie: archetype id →
+// which classes weight it ×10/×5 (baseline ×1 omitted).
+const familiesByArchetype: Record<string, { name: string; slug: string; icon: string; weight: number }[]> = {};
+for (const a of archetypes) {
+  familiesByArchetype[a.id] = families
+    .map(f => ({
+      name: f.name,
+      slug: f.slug,
+      icon: f.icon,
+      weight: (f.archetypeWeights as Record<string, number>)[a.id] || 0,
+    }))
+    .filter(f => f.weight >= 5)
+    .sort((x, y) => y.weight - x.weight);
+}
+
+type Row =
+  | { kind: 'section'; label: string }
+  | {
+      kind: 'list' | 'effects' | 'opposite' | 'ratings' | 'laws' | 'slots' | 'misc' | 'families';
+      label: string;
+      field: (a: Archetype) => any;
+    };
+
+const rows: Row[] = [
+  { kind: 'section', label: 'Role' },
+  { kind: 'slots',   label: 'Slot Eligibility', field: a => a.slots },
+  { kind: 'ratings', label: 'Rating Bonus',     field: a => a.ratings },
+  { kind: 'opposite',label: 'Opposite (-60)',   field: a => a.opposite },
+  { kind: 'laws',    label: 'Favored Laws',     field: a => a.favoredLaws },
+  { kind: 'families',label: 'Common in families', field: a => familiesByArchetype[a.id] },
+
+  { kind: 'section', label: 'Leader Effects' },
+  { kind: 'effects', label: 'As Leader',        field: a => a.leaderEffects },
+
+  { kind: 'section', label: 'Slot Effects' },
+  { kind: 'effects', label: 'As General',       field: a => a.generalEffects },
+  { kind: 'effects', label: 'As Governor',      field: a => a.governorEffects },
+
+  { kind: 'section', label: 'Diplomatic Stance' },
+  { kind: 'list',    label: 'Modifiers',        field: a => a.misc },
+];
+
+const searchBlobs: Record<string, string> = {};
+for (const a of archetypes) searchBlobs[a.slug] = JSON.stringify(a).toLowerCase();
+---
+
+<Base
+  title="Archetypes"
+  active="archetypes"
+  description="The ten character archetypes of Old World — each one's rating contribution (Wisdom/Charisma/Courage/Discipline), favored law, polar opposite (a strong -60 opinion modifier), and the bonuses that fire as leader, general, or governor."
+>
+  <div class="page-meta">
+    <h1 class="page-title">Archetypes</h1>
+    <div class="page-stats">
+      <button
+        type="button"
+        class="stat stat--button"
+        id="arc-picker-toggle"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="arc-picker"
+      >
+        <b id="arc-visible-count">{archetypes.length}</b> of <b>{archetypes.length}</b> visible <span class="stat__chev">▾</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="nation-picker" id="arc-picker" hidden role="dialog" aria-label="Filter archetypes">
+    <div class="nation-picker__actions">
+      <button type="button" class="nation-picker__action" data-pick="all">Select all</button>
+      <button type="button" class="nation-picker__action" data-pick="none">Clear</button>
+      <button type="button" class="nation-picker__action nation-picker__action--close" data-pick="close">Done</button>
+    </div>
+    <ul class="nation-picker__list">
+      {archetypes.map(a => (
+        <li class="nation-picker__item">
+          <label class="nation-picker__row">
+            <input type="checkbox" class="nation-picker__cb" value={a.slug} checked />
+            <span class="arc-pick__glyph">{SLOT_GLYPH[a.slots[0]] || '·'}</span>
+            {a.icon && <img class="nation-picker__crest" src={`${base}${a.icon}`} alt="" onerror="this.style.display='none'" />}
+            <span class="nation-picker__name">{a.name}</span>
+          </label>
+        </li>
+      ))}
+    </ul>
+  </div>
+
+  <div class="grid__searchnote" id="grid-searchnote" hidden></div>
+
+  <div class="grid" id="arc-grid">
+    <div class="grid__scroll">
+      {/* min-width = the mobile-crush floor (≈10rem/col); above it the 10 columns
+          flex to fill the viewport, below it .grid__scroll scrolls. */}
+      <table class="ntbl" style={`min-width:${archetypes.length * 10 + 7.5}rem`}>
+        <colgroup>
+          <col class="ntbl__rowlabel-col" />
+          {archetypes.map(a => <col data-archetype={a.slug} />)}
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner">
+              <span class="rowlabel__small">Archetype →</span>
+              <span class="rowlabel__big">Attribute ↓</span>
+            </th>
+            {archetypes.map(a => (
+              <th class="nhdr nhdr--family" data-archetype={a.slug} id={a.slug}>
+                <div class="nhdr__inner">
+                  <span class="arc-hdr__group">{SLOT_GLYPH[a.slots[0]] || '·'} {ARCHETYPE_GROUP[a.slug] || a.slots[0]}</span>
+                  {a.icon && <img class="nhdr__crest" src={`${base}${a.icon}`} alt="" loading="lazy" onerror="this.style.display='none'" />}
+                  <span class="nhdr__name">{a.name}</span>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => row.kind === 'section' ? (
+            <tr class="srow">
+              <th class="srow__th" colspan={archetypes.length + 1}>
+                <span class="srow__chevron">▸</span>{row.label}
+              </th>
+            </tr>
+          ) : (
+            <tr>
+              <th class="rowlabel" scope="row">{row.label}</th>
+              {archetypes.map(a => {
+                const v = row.field(a);
+
+                if (row.kind === 'slots') {
+                  const items: string[] = v || [];
+                  return (
+                    <td class="cell yield-misc" data-archetype={a.slug}>
+                      <div class="chiplist">
+                        {items.map(s => <span class="chip chip--neutral">{SLOT_GLYPH[s] || ''} {s}</span>)}
+                      </div>
+                    </td>
+                  );
+                }
+
+                if (row.kind === 'ratings') {
+                  const items: { label: string; value: number }[] = v || [];
+                  if (items.length === 0) {
+                    return <td class="cell is-empty" data-archetype={a.slug}><span class="cell__dash">—</span></td>;
+                  }
+                  return (
+                    <td class="cell cell--effects" data-archetype={a.slug}>
+                      {items.map(r => (
+                        <div class={`effect ${RATING_TONE[r.label] || 'yield-misc'}`} title={r.label}>
+                          <img class="rating-ico" src={`${base}img/icons/ratings/${r.label.toLowerCase()}.png`} alt={r.label} onerror="this.style.display='none'" />
+                          <span class={`opinion__val opinion--${r.value >= 0 ? 'pos' : 'neg'}`}>
+                            {r.value >= 0 ? '+' : ''}{r.value}
+                          </span>
+                        </div>
+                      ))}
+                    </td>
+                  );
+                }
+
+                if (row.kind === 'opposite') {
+                  if (!v) {
+                    return <td class="cell is-empty" data-archetype={a.slug}><span class="cell__dash">—</span></td>;
+                  }
+                  return (
+                    <td class="cell yield-discontent" data-archetype={a.slug}>
+                      <a href={`#${v.name.toLowerCase()}`} class="opposite-link">{v.name}</a>
+                      <span class="opinion__val opinion--neg">{v.value}</span>
+                    </td>
+                  );
+                }
+
+                if (row.kind === 'laws') {
+                  const items: { id: string; label: string; value: number }[] = v || [];
+                  if (items.length === 0) {
+                    return <td class="cell is-empty" data-archetype={a.slug}><span class="cell__dash">—</span></td>;
+                  }
+                  return (
+                    <td class="cell yield-civics" data-archetype={a.slug}>
+                      {items.map(l => (
+                        <div class="law-row">
+                          <span class="law-row__name">{l.label}</span>
+                          <span class={`opinion__val opinion--${l.value >= 0 ? 'pos' : 'neg'}`}>
+                            {l.value >= 0 ? '+' : ''}{l.value}
+                          </span>
+                        </div>
+                      ))}
+                    </td>
+                  );
+                }
+
+                if (row.kind === 'families') {
+                  const items: { name: string; slug: string; icon: string; weight: number }[] = v || [];
+                  if (items.length === 0) {
+                    return <td class="cell is-empty" data-archetype={a.slug}><span class="cell__dash">—</span></td>;
+                  }
+                  return (
+                    <td class="cell yield-misc" data-archetype={a.slug}>
+                      <div class="chiplist">
+                        {items.map(f => (
+                          <a class={`chip chip--neutral famchip ${f.weight >= 10 ? 'famchip--x10' : ''}`} href={`${base}families#${f.slug}`}>
+                            <img class="famchip__icon" src={`${base}${f.icon}`} alt="" loading="lazy" />
+                            {f.name} <b>×{f.weight}</b>
+                          </a>
+                        ))}
+                      </div>
+                    </td>
+                  );
+                }
+
+                if (row.kind === 'effects') {
+                  const items: string[] = v || [];
+                  if (items.length === 0) {
+                    return <td class="cell is-empty" data-archetype={a.slug}><span class="cell__dash">—</span></td>;
+                  }
+                  return (
+                    <td class="cell cell--effects" data-archetype={a.slug}>
+                      {items.map(text => {
+                        const yieldKey = classifyYield(text)?.toLowerCase() || 'misc';
+                        return (
+                          <div class={`effect yield-${yieldKey}`}>
+                            <LinkedText text={text} showIcons={false} iconsForYields={true} />
+                          </div>
+                        );
+                      })}
+                    </td>
+                  );
+                }
+
+                if (row.kind === 'list') {
+                  const items: string[] = v || [];
+                  if (items.length === 0) {
+                    return <td class="cell is-empty" data-archetype={a.slug}><span class="cell__dash">—</span></td>;
+                  }
+                  return (
+                    <td class="cell yield-misc" data-archetype={a.slug}>
+                      <ul class="modlist">
+                        {items.map(m => <li>{m}</li>)}
+                      </ul>
+                    </td>
+                  );
+                }
+
+                return <td class="cell is-empty" data-archetype={a.slug}>—</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="application/json" id="arc-search-blobs" set:html={JSON.stringify(searchBlobs)}></script>
+  <script is:inline>
+    // Combined column-picker + search, mirroring the Nations page
+    // (state of the art), keyed by data-archetype.
+    (function () {
+      const input = document.getElementById('site-search');
+      const blobNode = document.getElementById('arc-search-blobs');
+      const grid = document.getElementById('arc-grid');
+      const note = document.getElementById('grid-searchnote');
+      const toggle = document.getElementById('arc-picker-toggle');
+      const picker = document.getElementById('arc-picker');
+      const visibleCount = document.getElementById('arc-visible-count');
+      if (!blobNode || !grid) return;
+      let blobs;
+      try { blobs = JSON.parse(blobNode.textContent || '{}'); } catch { return; }
+      const slugs = Object.keys(blobs);
+      const picked = new Set(slugs);
+
+      function applyFilters() {
+        const q = ((input && input.value) || '').trim().toLowerCase();
+        let visibleN = 0, hiddenBySearch = 0;
+        for (const slug of slugs) {
+          const matchesSearch = !q || blobs[slug].includes(q);
+          const isPicked = picked.has(slug);
+          const visible = matchesSearch && isPicked;
+          if (visible) visibleN++;
+          if (!matchesSearch) hiddenBySearch++;
+          for (const el of grid.querySelectorAll('[data-archetype="' + slug + '"]')) {
+            el.classList.toggle('is-hidden', !visible);
+          }
+        }
+        if (visibleCount) visibleCount.textContent = String(visibleN);
+        // Shrink the table's min-width floor to the visible-column count so hiding
+        // columns can't leave a phantom scroll (the floor reserving hidden cols'
+        // space) on screens narrower than the full-table floor.
+        const tbl = grid.querySelector('table.ntbl');
+        if (tbl) tbl.style.minWidth = (visibleN * 10 + 7.5) + 'rem';
+        if (note) {
+          if (q && hiddenBySearch > 0) {
+            note.hidden = false;
+            note.textContent =
+              'Showing ' + (slugs.length - hiddenBySearch) + ' of ' + slugs.length +
+              ' archetypes matching "' + (input ? input.value : '') + '"';
+          } else {
+            note.hidden = true;
+            note.textContent = '';
+          }
+        }
+      }
+
+      if (input) input.addEventListener('input', applyFilters);
+
+      if (toggle && picker) {
+        toggle.addEventListener('click', () => {
+          const open = !picker.hidden;
+          picker.hidden = open;
+          toggle.setAttribute('aria-expanded', String(!open));
+        });
+        document.addEventListener('click', (e) => {
+          if (picker.hidden) return;
+          if (picker.contains(e.target) || toggle.contains(e.target)) return;
+          picker.hidden = true;
+          toggle.setAttribute('aria-expanded', 'false');
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !picker.hidden) {
+            picker.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.focus();
+          }
+        });
+      }
+
+      const cbs = picker ? picker.querySelectorAll('.nation-picker__cb') : [];
+      cbs.forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) picked.add(cb.value);
+          else picked.delete(cb.value);
+          applyFilters();
+        });
+      });
+
+      if (picker) {
+        picker.addEventListener('click', (e) => {
+          const btn = e.target.closest('[data-pick]');
+          if (!btn) return;
+          const action = btn.getAttribute('data-pick');
+          if (action === 'all') {
+            slugs.forEach((s) => picked.add(s));
+            cbs.forEach((cb) => (cb.checked = true));
+            applyFilters();
+          } else if (action === 'none') {
+            picked.clear();
+            cbs.forEach((cb) => (cb.checked = false));
+            applyFilters();
+          } else if (action === 'close') {
+            picker.hidden = true;
+            if (toggle) toggle.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+
+      applyFilters();
+    })();
+  </script>
+</Base>
+
+<style>
+  .arc-pick__glyph {
+    width: 1.1em;
+    text-align: center;
+    color: var(--text-faint);
+    flex: none;
+  }
+
+  .arc-hdr__group {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.1rem;
+  }
+
+  .chiplist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+  .chiplist .chip {
+    padding: 0.08rem 0.4rem;
+    font-size: 0.66rem;
+  }
+
+  /* "Common in families" chips — inverted aiTraitDie view */
+  .famchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .famchip:hover { text-decoration: none; color: var(--gold); }
+  .famchip b {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+  .famchip--x10 b { color: var(--gold); }
+  .famchip__icon {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+  }
+
+  /* Natural left-aligned flow — don't justify (space-between) the icon/value or
+     the words of an effect to opposite edges of these wide columns. */
+  .cell--effects .effect {
+    display: block;
+    line-height: 1.35;
+  }
+  .cell--effects .rating-label {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+  }
+  .cell--effects .rating-ico { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 0.3rem; }
+
+  .opposite-link {
+    display: block;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: inherit !important;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .law-row {
+    display: flex;
+    justify-content: flex-start;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.05rem 0;
+    font-size: 0.7rem;
+  }
+  .law-row__name {
+    color: inherit;
+  }
+
+  .modlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .modlist li {
+    font-size: 0.66rem;
+    color: var(--text);
+    padding: 0.05rem 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .modlist li:last-child { border-bottom: 0; }
+
+  .opinion__val {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 0.78rem;
+  }
+  .opinion--pos { color: #4caf7d; }
+  .opinion--neg { color: #d46e6e; }
+</style>

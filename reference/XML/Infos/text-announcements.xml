@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Root>
+	<Entry>
+		<zType>TEXT_TITLE_COMMUNITY_TOURNAMENT_2026</zType>
+		<en-US>Community Tournament 2026 Announced</en-US>
+		<es>Torneo de la comunidad: Duelistas de Old World</es>
+		<de>Duellantenturnier von Old World</de>
+		<fr>Tournoi de duellistes de la communauté d'Old World</fr>
+		<ja>Old World コミュニティ決闘チャレンジ</ja>
+		<zh-TW>《旧世界》社群决斗大赛</zh-TW>
+		<ru>Турнир дуэлянтов сообщества Old World</ru>
+		<zh-CN>《旧世界》社群决斗大赛</zh-CN>
+		<pt-BR>Torneiro de Duelistas da Comunidade de Old World</pt-BR>
+		<ko>올드 월드 커뮤니티 결투 토너먼트</ko>
+	</Entry>
+	<Entry>
+		<zType>TEXT_COMMUNITY_TOURNAMENT_2026</zType>
+		<en-US><![CDATA[
+Hello, Old World!
+
+The Community Tournament returns for Season 3 — a series of one-on-one Network Duels open to all players. Battle through the Swiss qualifiers, advance to the Championship Bracket, and crown a champion. Registration is open until June 30 2026. To join the action:
+<li>Join the <color="lightblue"><link="https://discord.com/invite/YpuqQ6p3CS">Discord</link></color></li>
+<li>Sign up on our tournament site <color="lightblue"><link="https://per-ankh.app/">Per Ankh</link></color></li>
+<li>Read the <color="lightblue"><link="https://docs.google.com/document/d/1ndBXIbPFnpBRmHQOonLP5NdMeE5kJF7UDfxcTx3D-6Y/">Rules</link></color></li>
+
+Whether you’re new to Old World Multiplayer or a seasoned duelist, we'd love to have you join us!
+]]></en-US>
+		<es />
+		<de />
+		<fr />
+		<ja />
+		<zh-TW />
+		<ru />
+		<zh-CN />
+		<pt-BR />
+		<ko />
+	</Entry>
+</Root>

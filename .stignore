@@ -1,0 +1,24 @@
+// Syncthing ignore file for moving/syncing the project to Windows
+// Using Syncthing prefixes: (?d) = deleteable, (?i) = case-insensitive
+
+**.obsidian
+(?d).DS_Store
+(?d)(?i)node_modules
+(?d)(?i).astro
+(?d)(?i)dist
+(?d)(?i)__pycache__
+(?d)(?i).DS_Store
+(?d)(?i).claude
+(?d)(?i).env*
+(?d)(?i)*.log
+(?d)(?i)*.pyc
+(?d)(?i)from-design/*.zip
+
+// Heavy game assets not needed to run the reference overlay
+(?d)(?i)reference/Graphics
+(?d)(?i)reference/Source
+(?d)(?i)reference/XML/Mods
+(?d)(?i)reference/XML/UI
+
+// Huge event background images (~300MB)
+(?d)(?i)public/img/events

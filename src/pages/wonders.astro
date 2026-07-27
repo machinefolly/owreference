@@ -1,0 +1,536 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import wonders from '../data/wonders.json';
+import { classifyYield } from '../lib/entities';
+
+const base = import.meta.env.BASE_URL;
+
+// Per-yield cost columns, in in-game yield order (must match
+// COST_YIELDS in scripts/build_wonders.py).
+const COST_COLS = ['food', 'iron', 'stone', 'wood', 'civics'] as const;
+
+// Culture-tier art (icon over words, per the design rules).
+const ERA_ORDER: Record<string, number> = { Weak: 1, Developing: 2, Strong: 3, Legendary: 4 };
+const eraIcon = (era: string) => `${base}img/icons/culture/${era.toLowerCase()}.png`;
+const yieldIcon = (key: string) => `${base}img/icons/yields/${key}.png`;
+
+// Pre-classify a JSON blob per wonder for the search filter.
+const searchBlobs: Record<string, string> = {};
+for (const w of wonders) {
+  searchBlobs[w.slug] = JSON.stringify(w).toLowerCase();
+}
+
+const ERAS = ['Weak', 'Developing', 'Strong', 'Legendary'] as const;
+const dlcCount = wonders.filter(w => w.dlc).length;
+
+// ── Benefit-scope groups (order = broadest reach first). Each wonder's
+// effects are pre-bucketed in wonders.json by which XML side-channel they
+// come from — see scoped_effects() in scripts/build_wonders.py. ──
+const SCOPES = [
+  { key: 'global',    label: 'Global',     glyph: '◈', hint: 'Applies to your whole empire' },
+  { key: 'allCities', label: 'All cities', glyph: '⁙', hint: 'Every city you control' },
+  { key: 'localCity', label: 'This city',  glyph: '⌂', hint: "Only the wonder's own city" },
+  { key: 'tile',      label: 'Tile',       glyph: '⬡', hint: 'On the wonder tile itself' },
+] as const;
+const hasBenefits = (w: typeof wonders[number]) =>
+  SCOPES.some(s => ((w.scopes as any)[s.key] as string[]).length > 0);
+
+// ── Faceted-filter option lists (deterministic order, present only) ──
+const present = <T,>(pref: readonly T[], have: Set<T>) => pref.filter(v => have.has(v));
+const SOURCES = present(
+  ['Base game', 'Wonders & Dynasties', 'Empires of the Indus', 'Search & Progress', 'Behind the Throne'] as const,
+  new Set(wonders.map(w => w.source)),
+);
+const LOC_TAGS = present(
+  ['Any tile', 'Hill', 'Coastal Water', 'Adj. Mountain / Volcano', 'Arid or Sand',
+   'River', 'Fresh Water source', 'Habitable Tile', 'Holy City'] as const,
+  new Set(wonders.flatMap(w => w.locationTags as string[])),
+);
+const HOLY = [
+  { val: 'yes', label: 'Requires Holy City' },
+  { val: 'no',  label: 'No Holy City requirement' },
+];
+
+type Facet = { key: string; title: string; opts: { val: string; label: string; icon?: string; count: number }[] };
+const cnt = (pred: (w: typeof wonders[number]) => boolean) => wonders.filter(pred).length;
+const FACETS: Facet[] = [
+  { key: 'era', title: 'Culture tier', opts: ERAS.filter(e => cnt(w => w.era === e) > 0).map(e =>
+      ({ val: e, label: `${e} Culture`, icon: eraIcon(e), count: cnt(w => w.era === e) })) },
+  { key: 'source', title: 'Source', opts: SOURCES.map(s =>
+      ({ val: s, label: s, count: cnt(w => w.source === s) })) },
+  { key: 'loc', title: 'Location requirement', opts: LOC_TAGS.map(t =>
+      ({ val: t, label: t, count: cnt(w => (w.locationTags as string[]).includes(t)) })) },
+  { key: 'holy', title: 'Holy City', opts: HOLY.map(h =>
+      ({ val: h.val, label: h.label, count: cnt(w => (w.isHolyCity ? 'yes' : 'no') === h.val) })) },
+];
+---
+
+<Base
+  title="Wonders"
+  active="wonders"
+  pageMark="🏛️"
+  description={`The ${wonders.length} World Wonders of Old World (${wonders.length - dlcCount} base game, ${dlcCount} DLC) — build cost broken out per yield (Food, Iron, Stone, Wood, Civics, sortable), Culture tier, tile location requirement, per-turn yield output, and every benefit grouped by scope (Global, All cities, This city, Tile) so it is clear what reaches your whole empire versus just the wonder's city. Every fact is derived from the game's improvement.xml, not the legacy spreadsheet. Buildable by any nation.`}
+>
+  <div class="page-meta">
+    <h1 class="page-title">Wonders</h1>
+    <div class="page-stats">
+      <button
+        type="button"
+        class="stat stat--button"
+        id="wonder-picker-toggle"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="wonder-picker"
+      >
+        <b id="wonder-visible-count">{wonders.length}</b> of <b>{wonders.length}</b> visible <span class="stat__chev">▾</span>
+      </button>
+    </div>
+  </div>
+
+  <p class="lede">
+    Completing a wonder always grants <b>Legitimacy</b> by its tier — and many wonders also fire a
+    <b>decision event</b> with its own rewards (the <span class="chip chip--event chip--event-demo">📜 Event</span>
+    chip below): see <a href={`${base}wonder-events`}>Wonder Events</a> for every choice.
+  </p>
+
+  <div class="nation-picker nation-picker--facets" id="wonder-picker" hidden role="dialog" aria-label="Filter wonders">
+    <div class="nation-picker__actions">
+      <button type="button" class="nation-picker__action" data-pick="all">Select all</button>
+      <button type="button" class="nation-picker__action" data-pick="none">Clear</button>
+      <button type="button" class="nation-picker__action nation-picker__action--close" data-pick="close">Done</button>
+    </div>
+    {FACETS.map(f => (
+      <div class="facet">
+        <div class="facet__title">{f.title}</div>
+        <ul class="nation-picker__list">
+          {f.opts.map(o => (
+            <li class="nation-picker__item">
+              <label class="nation-picker__row">
+                <input type="checkbox" class="nation-picker__cb" data-facet={f.key} value={o.val} checked />
+                {o.icon && <img class="nation-picker__crest" src={o.icon} alt="" onerror="this.style.display='none'" />}
+                <span class="nation-picker__name">{o.label}</span>
+                <span class="nation-picker__count">{o.count}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </div>
+
+  <div class="grid__searchnote" id="grid-searchnote" hidden></div>
+
+  <div class="grid" id="wonders-grid">
+    <div class="grid__scroll">
+      <table class="ntbl wtbl">
+        <colgroup>
+          <col class="wtbl__name-col" />
+          <col class="wtbl__era-col" />
+          <col class="wtbl__build-col" />
+          <col class="wtbl__cult-col" />
+          <col class="wtbl__loc-col" />
+          {COST_COLS.map(() => <col class="wtbl__cost-col" />)}
+          <col class="wtbl__benefits-col" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner"><span class="nhdr__name">Wonder</span></th>
+            <th class="nhdr nhdr--col" title="Culture level required to build"><span class="nhdr__name">Culture</span></th>
+            <th class="nhdr nhdr--col nhdr--cost" title="Build time in turns"><span class="nhdr__name">Build</span></th>
+            <th class="nhdr nhdr--col nhdr--cost yield-culture" title="Culture per turn from the wonder tile">
+              <span class="nhdr__name">
+                <img class="nhdr__yico" src={yieldIcon('culture')} alt="" onerror="this.style.display='none'" />
+                Culture/Turn
+              </span>
+            </th>
+            <th class="nhdr nhdr--col"><span class="nhdr__name">Location</span></th>
+            {COST_COLS.map(y => (
+              <th class={`nhdr nhdr--col nhdr--cost yield-${y}`} title={`${y[0].toUpperCase() + y.slice(1)} cost`}>
+                <span class="nhdr__name">
+                  <img class="nhdr__yico" src={yieldIcon(y)} alt="" onerror="this.style.display='none'" />
+                  {y[0].toUpperCase() + y.slice(1)}
+                </span>
+              </th>
+            ))}
+            <th class="nhdr nhdr--col" title="Benefits grouped by reach — derived from XML"><span class="nhdr__name">Benefits by scope</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {wonders.map(w => (
+            <tr
+              data-wonder={w.slug}
+              data-era={w.era}
+              data-source={w.source}
+              data-loc={(w.locationTags as string[]).join('|')}
+              data-holy={w.isHolyCity ? 'yes' : 'no'}
+              id={w.slug}
+            >
+              <th class="rowlabel rowlabel--wonder" scope="row" data-sortval={w.sortName}>
+                <div class="wname">
+                  {w.icon ? (
+                    <img class="wname__art" src={`${base}${w.icon}`} alt="" loading="lazy" onerror="this.style.display='none'" />
+                  ) : (
+                    <span class="wname__art wname__art--ph" aria-hidden="true">🏛️</span>
+                  )}
+                  <div class="wname__text">
+                    <a class="wname__name" href={`${base}wonders/${w.slug}`}>{w.name}</a>
+                    <div class="wname__meta">
+                      {w.vp > 0 && <span class="chip chip--vp" title="Victory Points"><b>{w.vp}</b> VP</span>}
+                      {w.dlc && <span class="chip chip--dlc" title={w.dlcLabel}>DLC</span>}
+                      {w.isHolyCity && <span class="chip chip--holy" title="Holy City Wonder">✧ Holy</span>}
+                      {(w as any).events?.length > 0 && (
+                        <a class="chip chip--event" href={`${base}wonder-events#${(w as any).events[0].id}`}
+                           title="Completing this wonder can fire a decision event — see its choices and rewards">
+                          📜 Event
+                        </a>
+                      )}
+                    </div>
+                    {w.otherOutput.length > 0 && (
+                      <div class="wname__output">
+                        {w.otherOutput.map((o: any) => (
+                          <span class={`chip yield-${o.yield}`} title="Per-turn yield from the wonder tile">
+                            <img class="chip__icon" src={yieldIcon(o.yield)} alt="" onerror="this.style.display='none'" />
+                            {o.label.replace('/Turn', '')}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </th>
+
+              {/* Culture tier — icon over words, sorts by tier order */}
+              <td class="cell cell--era" data-sortval={ERA_ORDER[w.era] ?? 0}>
+                <span class="era-tag" title={`${w.era} Culture`}>
+                  <img class="era-tag__ico" src={eraIcon(w.era)} alt="" onerror="this.style.display='none'" />
+                  <span class="era-tag__txt">{w.era}</span>
+                </span>
+              </td>
+
+              {/* Build time in turns (sortable) */}
+              {w.buildTurns > 0 ? (
+                <td class="cell cell--cost" data-sortval={w.buildTurns}>
+                  <span class="costval">{w.buildTurns}<span class="costval__unit">t</span></span>
+                </td>
+              ) : (
+                <td class="cell cell--cost is-empty"><span class="cell__dash">—</span></td>
+              )}
+
+              {/* Culture per turn from the wonder tile (own sortable column) */}
+              {w.culturePerTurn > 0 ? (
+                <td class="cell cell--cost yield-culture" data-sortval={w.culturePerTurn}>
+                  <span class="costval">
+                    <img class="costval__ico" src={yieldIcon('culture')} alt="" onerror="this.style.display='none'" />
+                    {w.culturePerTurn}
+                  </span>
+                </td>
+              ) : (
+                <td class="cell cell--cost is-empty"><span class="cell__dash">—</span></td>
+              )}
+
+              {/* Location */}
+              <td class="cell cell--loc yield-misc">
+                <div class="cell__body"><LinkedText text={w.location} showIcons={false} /></div>
+              </td>
+
+              {/* Per-yield cost columns (game order) */}
+              {COST_COLS.map(y => {
+                const v = (w.costMap as any)[y] as number | null;
+                return v == null ? (
+                  <td class="cell cell--cost is-empty"><span class="cell__dash">—</span></td>
+                ) : (
+                  <td class={`cell cell--cost yield-${y}`} data-sortval={v}>
+                    <span class="costval">
+                      <img class="costval__ico" src={yieldIcon(y)} alt="" onerror="this.style.display='none'" />
+                      {v}
+                    </span>
+                  </td>
+                );
+              })}
+
+              {/* Benefits, grouped by scope (global / all cities / this city
+                  / tile). Each group derived from XML side-channels. A curated
+                  strategy note (+ any free-text tier caveat) folds in below. */}
+              <td class="cell cell--benefits">
+                {hasBenefits(w) ? (
+                  <div class="scopes">
+                    {SCOPES.map(s => {
+                      const lines = (w.scopes as any)[s.key] as string[];
+                      if (!lines.length) return null;
+                      return (
+                        <div class={`scope scope--${s.key}`}>
+                          <span class="scope__tag" title={s.hint}>
+                            <span class="scope__glyph" aria-hidden="true">{s.glyph}</span>{s.label}
+                          </span>
+                          <div class="scope__lines">
+                            {lines.map((text: string) => {
+                              const yk = classifyYield(text)?.toLowerCase() || 'misc';
+                              return (
+                                <div class={`effect yield-${yk}`}>
+                                  <LinkedText text={text} showIcons={false} iconsForYields={true} />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span class="cell__dash">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="application/json" id="wonder-search-blobs" set:html={JSON.stringify(searchBlobs)}></script>
+  <script is:inline>
+    // Faceted picker + search on the flat (sortable) table. Facets are
+    // read from row data-attributes (data-era/source/loc/holy); semantics
+    // are OR within a facet, AND across facets, composed with the search.
+    (function () {
+      const input = document.getElementById('site-search');
+      const blobNode = document.getElementById('wonder-search-blobs');
+      const grid = document.getElementById('wonders-grid');
+      const note = document.getElementById('grid-searchnote');
+      const toggle = document.getElementById('wonder-picker-toggle');
+      const picker = document.getElementById('wonder-picker');
+      const visibleCount = document.getElementById('wonder-visible-count');
+      if (!blobNode || !grid || !picker) return;
+      let blobs;
+      try { blobs = JSON.parse(blobNode.textContent || '{}'); } catch { return; }
+
+      // facet key → row data-attribute. `loc` is multi-valued ('|'-joined).
+      const FACET_ATTR = { era: 'data-era', source: 'data-source', loc: 'data-loc', holy: 'data-holy' };
+      const rows = Array.from(grid.querySelectorAll('tr[data-wonder]'));
+      const cbs = Array.from(picker.querySelectorAll('.nation-picker__cb'));
+      // picked[facet] = Set of checked values (rebuilt from the checkboxes).
+      const picked = {};
+      function syncPicked() {
+        for (const k of Object.keys(FACET_ATTR)) picked[k] = new Set();
+        cbs.forEach((cb) => { if (cb.checked) picked[cb.getAttribute('data-facet')].add(cb.value); });
+      }
+      function rowVals(row, facet) {
+        const raw = row.getAttribute(FACET_ATTR[facet]) || '';
+        return facet === 'loc' ? raw.split('|') : [raw];
+      }
+      function rowPasses(row) {
+        for (const facet of Object.keys(FACET_ATTR)) {
+          const pset = picked[facet];
+          if (!rowVals(row, facet).some((v) => pset.has(v))) return false;
+        }
+        return true;
+      }
+
+      function applyFilters() {
+        syncPicked();
+        const q = ((input && input.value) || '').trim().toLowerCase();
+        let visibleN = 0, hiddenBySearch = 0;
+        for (const row of rows) {
+          const slug = row.getAttribute('data-wonder');
+          const matchesSearch = !q || (blobs[slug] || '').includes(q);
+          const visible = matchesSearch && rowPasses(row);
+          if (visible) visibleN++;
+          if (!matchesSearch) hiddenBySearch++;
+          row.classList.toggle('is-hidden', !visible);
+        }
+        if (visibleCount) visibleCount.textContent = String(visibleN);
+        if (note) {
+          if (q && hiddenBySearch > 0) {
+            note.hidden = false;
+            note.textContent =
+              'Showing ' + (rows.length - hiddenBySearch) + ' of ' + rows.length +
+              ' wonders matching "' + (input ? input.value : '') + '"';
+          } else {
+            note.hidden = true;
+            note.textContent = '';
+          }
+        }
+      }
+
+      if (input) input.addEventListener('input', applyFilters);
+
+      if (toggle) {
+        toggle.addEventListener('click', () => {
+          const open = !picker.hidden;
+          picker.hidden = open;
+          toggle.setAttribute('aria-expanded', String(!open));
+        });
+        document.addEventListener('click', (e) => {
+          if (picker.hidden) return;
+          if (picker.contains(e.target) || toggle.contains(e.target)) return;
+          picker.hidden = true;
+          toggle.setAttribute('aria-expanded', 'false');
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !picker.hidden) {
+            picker.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.focus();
+          }
+        });
+      }
+
+      cbs.forEach((cb) => cb.addEventListener('change', applyFilters));
+
+      picker.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pick]');
+        if (!btn) return;
+        const action = btn.getAttribute('data-pick');
+        if (action === 'all') { cbs.forEach((cb) => (cb.checked = true)); applyFilters(); }
+        else if (action === 'none') { cbs.forEach((cb) => (cb.checked = false)); applyFilters(); }
+        else if (action === 'close') {
+          picker.hidden = true;
+          if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      applyFilters();
+    })();
+  </script>
+  <script is:inline>
+    // Click-to-sort columns. Mirrors urban-improvements.astro, extended to
+    // honor data-sortval (Culture sorts by tier order, Wonder by sort-name)
+    // so the visible label can stay an icon/word.
+    (function () {
+      const table = document.querySelector('#wonders-grid table.ntbl');
+      if (!table || !table.tHead) return;
+      const ths = Array.from(table.tHead.rows[0].cells);
+      ths.forEach((th, ci) => {
+        th.classList.add('is-sortable');
+        th.addEventListener('click', () => {
+          const tb = table.tBodies[0];
+          const rows = Array.from(tb.rows);
+          const asc = th.getAttribute('aria-sort') !== 'ascending';
+          ths.forEach(h => h.removeAttribute('aria-sort'));
+          th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+          const val = r => {
+            const c = r.cells[ci];
+            const sv = c && c.getAttribute && c.getAttribute('data-sortval');
+            const t = (sv != null ? sv : (c ? c.textContent : '')).trim();
+            const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+            return { t, n: (t && !isNaN(n)) ? n : null };
+          };
+          rows.sort((a, b) => {
+            const ka = val(a), kb = val(b);
+            let r;
+            if (ka.n !== null && kb.n !== null) r = ka.n - kb.n;
+            else if (ka.n !== null) r = -1;
+            else if (kb.n !== null) r = 1;
+            else r = ka.t.localeCompare(kb.t);
+            return asc ? r : -r;
+          });
+          rows.forEach(r => tb.appendChild(r));
+        });
+      });
+    })();
+  </script>
+</Base>
+
+<style>
+  /* Column widths */
+  .wtbl__name-col     { width: 18rem; }
+  .wtbl__era-col      { width: 7rem; }
+  .wtbl__build-col    { width: 4.5rem; }
+  .wtbl__cult-col     { width: 6rem; }
+  .wtbl__loc-col      { width: 10rem; }
+  .wtbl__cost-col     { width: 5.25rem; }
+  .wtbl__benefits-col { width: auto; }
+
+  /* Benefits cell — scope-grouped effect lines */
+  .cell--benefits { padding: 0.4rem 0.55rem; vertical-align: top; }
+  .scopes { display: flex; flex-direction: column; gap: 0.4rem; }
+  .scope { display: grid; grid-template-columns: 6.2rem 1fr; gap: 0.5rem; align-items: start; }
+  .scope__tag {
+    display: inline-flex; align-items: center; gap: 0.28rem;
+    font-family: var(--font-display); font-size: 0.68rem; letter-spacing: 0.04em;
+    color: var(--text-dim); padding-top: 0.15rem; white-space: nowrap; cursor: help;
+  }
+  .scope__glyph { font-size: 0.85rem; opacity: 0.8; color: var(--accent); }
+  .scope--global    .scope__glyph { color: #c9a04a; }
+  .scope--allCities .scope__glyph { color: #7fb0d8; }
+  .scope--localCity .scope__glyph { color: #b79bd8; }
+  .scope--tile      .scope__glyph { color: #86c08a; }
+  .scope__lines { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+  .scope + .scope { border-top: 1px solid var(--border); padding-top: 0.4rem; }
+
+  /* Sortable header affordance (same as urban/rural improvements) */
+  .nhdr--col {
+    background: var(--bg-elev-2);
+    color: var(--text);
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+    border-bottom: 2px solid var(--border-strong);
+    text-align: left;
+    padding: 0.45rem 0.55rem;
+  }
+  .nhdr__name { font-family: var(--font-display); font-size: 0.78rem; letter-spacing: 0.03em; display: inline-flex; align-items: center; gap: 0.3rem; }
+  .nhdr__yico { width: 14px; height: 14px; object-fit: contain; }
+  .nhdr.is-sortable, .rowlabel--corner.is-sortable { cursor: pointer; user-select: none; }
+  .nhdr.is-sortable:hover, .rowlabel--corner.is-sortable:hover { filter: brightness(1.12); }
+  .nhdr.is-sortable .nhdr__name::after,
+  .rowlabel--corner.is-sortable .nhdr__name::after {
+    content: '↕'; opacity: 0.35; margin-left: 0.25rem; font-size: 0.85em;
+  }
+  .nhdr[aria-sort='ascending'] .nhdr__name::after,
+  .rowlabel--corner[aria-sort='ascending'] .nhdr__name::after { content: '↑'; opacity: 0.9; }
+  .nhdr[aria-sort='descending'] .nhdr__name::after,
+  .rowlabel--corner[aria-sort='descending'] .nhdr__name::after { content: '↓'; opacity: 0.9; }
+  .nhdr--cost { text-align: right; }
+  .nhdr--cost .nhdr__name { justify-content: flex-end; }
+
+  /* Wonder name cell: art + Cinzel name + chips */
+  .rowlabel--wonder { padding: 0.45rem 0.6rem; text-align: left; background: var(--bg-elev); }
+  .wname { display: flex; gap: 0.55rem; align-items: flex-start; }
+  .wname__art {
+    width: 60px; height: 60px; object-fit: contain; flex-shrink: 0;
+    border-radius: 6px; background: rgba(0,0,0,0.25);
+  }
+  .wname__art--ph { display: inline-flex; align-items: center; justify-content: center; font-size: 1.6rem; opacity: 0.5; }
+  .wname__text { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+  .wname__name { font-family: var(--font-display); font-weight: 600; font-size: 0.95rem; color: var(--text); letter-spacing: 0.02em; text-decoration: none; }
+  .wname__name:hover { color: var(--accent); text-decoration: underline; }
+  .wname__meta { display: flex; gap: 0.25rem; flex-wrap: wrap; align-items: center; }
+  .wname__output { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+
+  /* Culture tier tag */
+  .cell--era { background: var(--bg-elev); background-image: none; }
+  .era-tag { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--text-dim); }
+  .era-tag__ico { width: 18px; height: 18px; object-fit: contain; }
+
+  /* Cost columns: right-aligned mono number, faint yield tint */
+  .cell--cost { text-align: right; padding: 0.3rem 0.55rem; background-image: none; }
+  .cell--cost.is-empty { background: var(--bg-elev); }
+  .costval { display: inline-flex; align-items: center; gap: 0.3rem; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.82rem; }
+  .costval__ico { width: 15px; height: 15px; object-fit: contain; flex-shrink: 0; }
+  .costval__unit { color: var(--text-faint); font-weight: 400; margin-left: 1px; }
+
+  /* Faceted picker: stacked sections inside the shared popover */
+  .nation-picker--facets { max-height: 70vh; overflow-y: auto; min-width: 16rem; }
+  .facet + .facet { margin-top: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+  .facet__title {
+    font-family: var(--font-display); font-size: 0.72rem; letter-spacing: 0.06em;
+    color: var(--text-faint); margin: 0 0 0.2rem; padding-left: 0.6rem;
+  }
+
+  /* Chip variants reused in the name cell */
+  .chip--vp { background: color-mix(in srgb, var(--accent) 35%, var(--bg-elev) 65%); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); padding: 0.05rem 0.4rem; font-size: 0.66rem; }
+  .chip--vp b { font-family: var(--font-mono); font-weight: 700; color: var(--accent); margin-right: 0.2rem; }
+  .chip--dlc { background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--border); padding: 0.05rem 0.4rem; font-size: 0.64rem; letter-spacing: 0.06em; font-family: var(--font-mono); text-transform: uppercase; }
+  .chip--holy { background: color-mix(in srgb, #6b5ea6 30%, var(--bg-elev) 70%); color: var(--text); border: 1px solid color-mix(in srgb, #6b5ea6 50%, transparent); padding: 0.05rem 0.4rem; font-size: 0.66rem; }
+  .chip--event { background: color-mix(in srgb, var(--accent) 22%, var(--bg-elev) 78%); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); padding: 0.05rem 0.4rem; font-size: 0.66rem; text-decoration: none; }
+  .chip--event:hover { background: color-mix(in srgb, var(--accent) 38%, var(--bg-elev) 62%); }
+  .chip--event-demo { cursor: default; }
+  .lede { color: var(--text-dim); font-size: 0.85rem; line-height: 1.55; max-width: 78ch; margin: 0.4rem 0 1.1rem; }
+  .lede b { color: var(--text); }
+  .lede a { color: var(--accent); }
+
+  .cell--loc { font-size: 0.78rem; }
+  tr.is-hidden { display: none; }
+
+  .nation-picker__count { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.72rem; color: var(--text-faint); }
+</style>

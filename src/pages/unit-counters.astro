@@ -1,0 +1,448 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import units from '../data/units.json';
+import { counterBonus, attackDamage } from '../lib/combat';
+
+const base = import.meta.env.BASE_URL;
+
+type Unit = typeof units[number];
+
+// Rock-paper-scissors matrix. Each row is "Attacker class" → which trait it
+// counters and by how much. Built entirely from the XML counter modifiers on
+// each unit's effect tree (own effects + trait effects): rows are the
+// primary classes present in the data, columns the union of traits any
+// vs-modifier actually targets — so a patch adding a new modifier target
+// (e.g. Camel's "+50% vs Horse" → the Horse column) appears automatically.
+
+const CLASS_ORDER = ['Infantry', 'Polearm', 'Mounted', 'Ranged', 'Siege', 'Melee', 'Horse'];
+const orderKey = (s: string) => { const i = CLASS_ORDER.indexOf(s); return i < 0 ? 99 : i; };
+const matrixPool = (units as Unit[]).filter(u => u.isCombat && u.isMilitary && !u.isWater);
+const ATTACKER_CLASSES = [...new Set(matrixPool.map(u => u.primaryLabel).filter(Boolean))]
+  .sort((a, b) => orderKey(a) - orderKey(b) || a.localeCompare(b));
+const DEFENDER_TARGETS = [...new Set(matrixPool.flatMap(u => u.counters
+  .filter(c => c.kind === 'vs' || c.kind === 'melee vs' || c.kind === 'attack vs')
+  .map(c => c.target)))]
+  .sort((a, b) => orderKey(a) - orderKey(b) || a.localeCompare(b));
+
+// Pick a small set of "iconic" units per class for the row legend.
+function pickIconic(cls: string): Unit[] {
+  return (units as Unit[])
+    .filter(u => u.isCombat && u.isMilitary && u.primaryLabel === cls && !u.nationPrereq)
+    .sort((a, b) => a.strength - b.strength)
+    .slice(0, 3);
+}
+
+interface CellGroup { value: number; names: string[] }
+
+// One group per distinct modifier value, so units are never listed under a
+// number they don't have (Spearman is +50% vs Mounted, only Pikeman is +100%).
+function cellFor(attackerClass: string, defender: string): CellGroup[] {
+  const matchers: Unit[] = (units as Unit[])
+    .filter(u => u.isCombat && u.isMilitary && u.primaryLabel === attackerClass);
+  const perUnit = new Map<string, number>();
+  for (const u of matchers) {
+    let v = 0;
+    for (const c of u.counters) {
+      if (c.target !== defender) continue;
+      // Attacker's perspective (row = attacking class), mirroring
+      // Unit.cs attackUnitStrength: 'vs' and 'attack vs' always apply;
+      // the melee bucket only applies if the attacker itself is melee —
+      // a Horse Archer carries Mounted's "+50% melee vs Siege" line but
+      // never benefits when attacking.
+      if (c.kind === 'vs' || c.kind === 'attack vs') v += c.value;
+      else if (c.kind === 'melee vs' && u.isMelee) v += c.value;
+    }
+    if (v !== 0 && !perUnit.has(u.name)) perUnit.set(u.name, v);
+  }
+  const byValue = new Map<number, string[]>();
+  for (const [name, v] of perUnit) {
+    if (!byValue.has(v)) byValue.set(v, []);
+    byValue.get(v)!.push(name);
+  }
+  return [...byValue.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([value, names]) => ({ value, names }));
+}
+
+const matrix = ATTACKER_CLASSES.map(cls => ({
+  cls,
+  iconic: pickIconic(cls),
+  cells: DEFENDER_TARGETS.map(d => ({ defender: d, groups: cellFor(cls, d) })),
+}));
+
+// ── Per-unit counter list (the spreadsheet's "If you're facing…" view) ──
+// Damage math lives in src/lib/combat.ts — the game's own
+// InfoHelpers.getAttackDamage with both sides' anti-trait modifiers.
+// isMilitary excludes Scouts, Explorers, and religion Disciples — they can
+// technically fight but aren't army units (their primaryLabel is Infantry,
+// so trait filters won't catch them).
+const landCombat = (units as Unit[]).filter(u => u.isCombat && u.isMilitary && !u.isWater);
+
+interface CounterPick { name: string; slug: string; iconSlug: string; dmg: number; nation: string | null; cls: string; hasBonus: boolean; str: number; techCost: number }
+
+function countersFor(def: Unit): CounterPick[] {
+  const picks: CounterPick[] = [];
+  for (const att of landCombat) {
+    // Ranked purely by damage, like the legacy sheet — a Cataphract with no
+    // anti-trait bonus still "counters" a Polybolos on raw strength. Mirror
+    // matches stay in (the sheet listed Polybolos as its own counter via
+    // Rapid Fire). This keeps membership consistent with the Unit Damage
+    // matrix: a row here = the defender's best column cells over there.
+    const dmg = attackDamage(att, def);
+    if (dmg < 7) continue;               // the sheet's "significant" bar
+    const bonus = counterBonus(att, def.traits, true, att.isMelee);
+    picks.push({ name: att.name, slug: att.slug, iconSlug: att.iconSlug, dmg, nation: att.nationLabel || null, cls: att.primaryLabel || '', hasBonus: bonus > 0, str: att.strength, techCost: att.techCost });
+  }
+  picks.sort((a, b) => b.dmg - a.dmg || a.name.localeCompare(b.name));
+  // One entry per name (upgrade dupes). All picks are rendered so the nation
+  // filter can surface deeper ones; display is capped to 8 client-side.
+  const seen = new Set<string>();
+  return picks.filter(p => !seen.has(p.name) && seen.add(p.name) !== undefined);
+}
+
+const PICK_CAP = 8;
+
+// Nation filter options (e.g. you + your opponent). Generic units always show.
+const nationOptions = [...new Set((units as Unit[]).map(u => u.nationLabel).filter(Boolean))].sort();
+
+const defenders = [...landCombat]
+  .sort((a, b) => b.strength - a.strength || a.name.localeCompare(b.name))
+  .map(def => {
+    // Server-render the default view: stronger attackers hidden (that toggle
+    // starts on; the tech toggle starts off), capped at PICK_CAP visible.
+    let vis = 0;
+    const picks = countersFor(def).map(p => {
+      const show = p.str <= def.strength && vis < PICK_CAP;
+      if (show) vis++;
+      return { ...p, initiallyHidden: !show };
+    });
+    return { def, picks };
+  });
+
+const tiers = new Map<number, typeof defenders>();
+for (const d of defenders) {
+  const t = Math.round(d.def.strength / 10);
+  if (!tiers.has(t)) tiers.set(t, []);
+  tiers.get(t)!.push(d);
+}
+const tierList = [...tiers.entries()].sort((a, b) => b[0] - a[0]);
+---
+
+<Base
+  title="Unit Counters at-a-glance"
+  active="unit-counters"
+  pageMark="⚔️"
+  pageStats={[
+    { label: 'units covered', value: defenders.length },
+    { label: 'attacker classes', value: ATTACKER_CLASSES.length },
+  ]}
+>
+  <p class="lede">
+    <b>If you're facing a unit, build these.</b> Each number is the damage that
+    attacker deals per hit — the game's own formula
+    (<code>6 × StrAtt / StrDef</code>, both sides' anti-trait modifiers applied,
+    full HP, open terrain, no promotions), the same numbers as the
+    <a href={`${base}unit-damage`}>Unit Damage</a> matrix, ranked by damage.
+    Research costs live on <a href={`${base}science-to-unlock`}>Total Science
+    to Unlock</a>.
+  </p>
+
+  <div class="natbar">
+    <span class="natbar__label">Nations</span>
+    <select id="nation-a" class="natbar__sel" aria-label="Your nation">
+      <option value="">All nations</option>
+      {nationOptions.map(n => <option value={n}>{n}</option>)}
+    </select>
+    <span class="natbar__vs">vs</span>
+    <select id="nation-b" class="natbar__sel" aria-label="Opponent nation">
+      <option value="">All nations</option>
+      {nationOptions.map(n => <option value={n}>{n}</option>)}
+    </select>
+    <label class="natbar__toggle" title="Hide attackers with a higher strength stat than the defender">
+      <input type="checkbox" id="hide-stronger" checked />
+      hide stronger attackers
+    </label>
+    <label class="natbar__toggle" title="Hide attackers whose cumulative tech cost (no starting techs; laws for unique units) exceeds the defender's">
+      <input type="checkbox" id="hide-costlier" />
+      hide attackers needing more tech
+    </label>
+    <span class="natbar__hint">Pick your nation and your opponent's to hide everyone else's unique units. Generic units always show.</span>
+  </div>
+
+  {tierList.map(([tier, list]) => (
+    <section class="ctier">
+      <h2 class="ctier__h">Strength {tier} defenders</h2>
+      <div class="grid">
+        <div class="grid__scroll">
+          <table class="ntbl ntbl--counters">
+            <tbody>
+              {list.map(({ def, picks }) => (
+                <tr id={def.slug} data-nation={def.nationLabel || ''} data-str={def.strength} data-tech={def.techCost}>
+                  <th class="rowlabel" scope="row">
+                    <div class="rl">
+                      <span class="rl__name">
+                        <img class="rl__icon" src={`${base}img/icons/units/${def.iconSlug}.png`} alt="" loading="lazy" />
+                        {def.name}
+                      </span>
+                      <span class="rl__sources">{def.primaryLabel}{def.nationLabel ? ` · ${def.nationLabel}` : ''}{def.isTribal ? ' · tribal' : ''}</span>
+                    </div>
+                  </th>
+                  <td class="cell cell--picks">
+                    {picks.length === 0 ? (
+                      <span class="cell__dash">no significant counters</span>
+                    ) : (
+                      <>
+                      <span class="cell__none cell__dash">none under current filters</span>
+                      {picks.map(p => (
+                        <a class={`pick${p.initiallyHidden ? ' nat-hidden' : ''}`} data-nation={p.nation || ''} data-str={p.str} data-tech={p.techCost} href={`${base}units#${p.slug}`} title={`${p.name}${p.nation ? ` (${p.nation})` : ''} — ${p.cls}, STR ${p.str / 10}, ${p.techCost} science to unlock — deals ${p.dmg} damage per attack${p.hasBonus ? ' (anti-trait bonus vs this unit)' : ''}`}>
+                          <img class="pick__icon" src={`${base}img/icons/units/${p.iconSlug}.png`} alt="" loading="lazy" />
+                          <span class="pick__name">{p.name}</span>
+                          <span class="pick__dmg">{p.dmg}</span>
+                        </a>
+                      ))}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  ))}
+
+  <h2 class="ctier__h ctier__h--matrix">Class overview</h2>
+  <div class="grid">
+    <div class="grid__scroll">
+      <table class="ntbl">
+        <colgroup>
+          <col class="ntbl__rowlabel-col" />
+          {DEFENDER_TARGETS.map(d => <col data-target={d} />)}
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner">
+              <span class="rowlabel__small">Target →</span>
+              <span class="rowlabel__big">Attacker ↓</span>
+            </th>
+            {DEFENDER_TARGETS.map(d => (
+              <th class="nhdr nhdr--family" data-target={d}>
+                <div class="nhdr__inner">
+                  <span class="nhdr__name">{d}</span>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {matrix.map(row => (
+            <tr>
+              <th class="rowlabel" scope="row">
+                <div class="rl">
+                  <span class="rl__name">{row.cls}</span>
+                  <span class="rl__sources">
+                    {row.iconic.map(u => u.name).join(', ')}
+                  </span>
+                </div>
+              </th>
+              {row.cells.map(cell => {
+                if (cell.groups.length === 0) {
+                  return (
+                    <td class="cell is-empty" data-target={cell.defender}>
+                      <span class="cell__dash">—</span>
+                    </td>
+                  );
+                }
+                return (
+                  <td class="cell" data-target={cell.defender}>
+                    {cell.groups.map(g => (
+                      <div class="counter">
+                        <span class={`counter__val ${g.value > 0 ? 'is-pos' : 'is-neg'}`}>{g.value > 0 ? '+' : ''}{g.value}%</span>
+                        <span class="counter__sources"><LinkedText text={g.names.join(' · ')} showIcons={false} /></span>
+                      </div>
+                    ))}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="legends">
+    <div class="legend">
+      <span class="legend__label">Read it</span>
+      <span>Row = which class is attacking. Column = the defender's trait. A "+50% vs Mounted" cell means Polearm units (Spearman etc.) get +50% strength when fighting any Mounted-trait unit. Green = advantage, red = penalty.</span>
+    </div>
+  </div>
+
+  <script is:inline>
+    (function () {
+      const selA = document.getElementById('nation-a');
+      const selB = document.getElementById('nation-b');
+      const chkStr = document.getElementById('hide-stronger');
+      const chkTech = document.getElementById('hide-costlier');
+      if (!selA || !selB) return;
+      const KEY = 'ow-nation-filter';
+      const STR_KEY = 'ow-str-filter';
+      const TECH_KEY = 'ow-tech-filter';
+      const PICK_CAP = 8;
+      try {
+        const saved = JSON.parse(localStorage.getItem(KEY) || '[]');
+        if (saved[0]) selA.value = saved[0];
+        if (saved[1]) selB.value = saved[1];
+        // Strength filter defaults on (explicit '0' opts out); tech filter
+        // defaults off (explicit '1' opts in).
+        if (chkStr) chkStr.checked = localStorage.getItem(STR_KEY) !== '0';
+        if (chkTech) chkTech.checked = localStorage.getItem(TECH_KEY) === '1';
+      } catch {}
+      function apply() {
+        const chosen = [selA.value, selB.value].filter(Boolean);
+        const ok = (n) => !n || chosen.length === 0 || chosen.includes(n);
+        const hideStronger = chkStr && chkStr.checked;
+        const hideCostlier = chkTech && chkTech.checked;
+        for (const tr of document.querySelectorAll('.ctier tbody tr')) {
+          const rowOk = ok(tr.dataset.nation || '');
+          tr.classList.toggle('nat-hidden', !rowOk);
+          if (!rowOk) continue;
+          const defStr = +(tr.dataset.str || 0);
+          const defTech = +(tr.dataset.tech || 0);
+          let shown = 0;
+          for (const p of tr.querySelectorAll('.pick')) {
+            const okPick = ok(p.dataset.nation || '')
+              && (!hideStronger || +(p.dataset.str || 0) <= defStr)
+              && (!hideCostlier || +(p.dataset.tech || 0) <= defTech);
+            const show = okPick && shown < PICK_CAP;
+            if (show) shown++;
+            p.classList.toggle('nat-hidden', !show);
+          }
+        }
+        for (const sec of document.querySelectorAll('.ctier')) {
+          sec.classList.toggle('nat-hidden', !sec.querySelector('tbody tr:not(.nat-hidden):not(.is-hidden)'));
+        }
+      }
+      function onChange() {
+        try {
+          localStorage.setItem(KEY, JSON.stringify([selA.value, selB.value]));
+          if (chkStr) localStorage.setItem(STR_KEY, chkStr.checked ? '1' : '0');
+          if (chkTech) localStorage.setItem(TECH_KEY, chkTech.checked ? '1' : '0');
+        } catch {}
+        apply();
+      }
+      selA.addEventListener('change', onChange);
+      selB.addEventListener('change', onChange);
+      if (chkStr) chkStr.addEventListener('change', onChange);
+      if (chkTech) chkTech.addEventListener('change', onChange);
+      apply();
+    })();
+  </script>
+
+  <script is:inline>
+    // Header search filters the defender rows by unit name.
+    (function () {
+      const input = document.getElementById('site-search');
+      if (!input) return;
+      function apply() {
+        const q = (input.value || '').trim().toLowerCase();
+        for (const tr of document.querySelectorAll('.ctier tbody tr')) {
+          const label = tr.querySelector('.rl');
+          const text = label ? label.textContent.toLowerCase() : '';
+          tr.classList.toggle('is-hidden', !!q && !text.includes(q));
+        }
+        for (const sec of document.querySelectorAll('.ctier')) {
+          sec.classList.toggle('is-hidden', !sec.querySelector('tbody tr:not(.nat-hidden):not(.is-hidden)'));
+        }
+      }
+      input.addEventListener('input', apply);
+    })();
+  </script>
+
+  <style>
+    .lede {
+      color: var(--text-dim);
+      max-width: 64ch;
+      margin: 0 0 1rem;
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+    .lede code {
+      background: var(--bg-elev);
+      padding: 0.05rem 0.35rem;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .ctier { margin: 0 0 1.1rem; }
+    .ctier__h {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      color: var(--text-dim);
+      margin: 0 0 0.4rem;
+    }
+    .ctier__h--matrix { margin-top: 1.6rem; }
+    .ntbl--counters .rowlabel { min-width: 13rem; }
+    .rl__icon { width: 1.15em; height: 1.15em; object-fit: contain; vertical-align: -0.2em; margin-right: 0.3em; }
+    .cell--picks { padding: 0.3rem 0.6rem; }
+    /* Shown only when every pick in the cell is filtered out. */
+    .cell--picks .cell__none { display: none; }
+    .cell--picks:not(:has(.pick:not(.nat-hidden))) .cell__none { display: inline; }
+    /* Tufte: no boxes, no hue system — icon, name, number. */
+    .pick {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      margin: 0.14rem 1.1rem 0.14rem 0;
+      color: var(--text);
+      font-size: 0.76rem;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .pick:hover { text-decoration: none; }
+    .pick:hover .pick__name { text-decoration: underline; text-underline-offset: 2px; }
+    .pick__icon { width: 1.15em; height: 1.15em; object-fit: contain; }
+    .pick__dmg {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 0.72rem;
+      color: var(--gold);
+    }
+    .rl { display: flex; flex-direction: column; gap: 0.1rem; }
+    .rl__name {
+      font-family: var(--font-display);
+      font-size: 0.84rem;
+      color: var(--text);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .rl__sources {
+      font-family: var(--font-mono);
+      font-size: 0.55rem;
+      color: var(--text-faint);
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }
+    .counter { display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem; padding: 0.12rem 0; }
+    .counter__val {
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .counter__val.is-pos { color: #4caf7d; }
+    .counter__val.is-neg { color: #c25555; }
+    .counter__sources {
+      font-size: 0.6rem;
+      opacity: 0.85;
+      letter-spacing: 0.02em;
+    }
+    .nhdr--family {
+      background: var(--bg-elev-2);
+      color: var(--text);
+      border-bottom: 2px solid var(--border-strong);
+      background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+    }
+  </style>
+</Base>

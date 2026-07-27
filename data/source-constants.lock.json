@@ -1,0 +1,66 @@
+{
+  "Base/Game/GameCore/Character.cs::canConvertReligion": {
+    "hash": "8481f07f95bf78d2",
+    "line": 8655
+  },
+  "Base/Game/GameCore/Character.cs::canHeadFamily": {
+    "hash": "efeb39cee380b7a4",
+    "line": 2252
+  },
+  "Base/Game/GameCore/Character.cs::chooseReligion": {
+    "hash": "862f18fcff6056e6",
+    "line": 8503
+  },
+  "Base/Game/GameCore/Character.cs::doReligion": {
+    "hash": "d982e8c55ae5a3fc",
+    "line": 7946
+  },
+  "Base/Game/GameCore/Character.cs::getCognomenMinValue": {
+    "hash": "ccc5f1f28daa5a4d",
+    "line": 4819
+  },
+  "Base/Game/GameCore/Character.cs::updateCognomen": {
+    "hash": "34dfc261f6edf1d5",
+    "line": 4827
+  },
+  "Base/Game/GameCore/InfoHelpers.cs::getAttackDamage": {
+    "hash": "74079f5e9a0b1314",
+    "line": 753
+  },
+  "Base/Game/GameCore/Player.cs::doFamilyReligion": {
+    "hash": "e6a55a0933f4d28b",
+    "line": 17210
+  },
+  "Base/Game/GameCore/Player.cs::updateFamilyHead": {
+    "hash": "7e7cf3281a0c67c2",
+    "line": 10277
+  },
+  "Base/Game/GameCore/Tile.cs::resetImprovementUnitTurns": {
+    "hash": "ec3ae4131aac2e9d",
+    "line": 2538
+  },
+  "Base/Game/GameCore/Tile.cs::skipImprovementUnitTurns": {
+    "hash": "12f3af2243ef3581",
+    "line": 2495
+  },
+  "Base/Game/GameCore/Unit.cs::attackUnitStrength": {
+    "hash": "8c1271d8952ffcb6",
+    "line": 8726
+  },
+  "Base/Game/GameCore/Unit.cs::counterAttackMelee": {
+    "hash": "9aa5a42a0d51c8fa",
+    "line": 6570
+  },
+  "Base/Game/GameCore/Unit.cs::defendUnitStrength": {
+    "hash": "adf05d34757bf147",
+    "line": 9044
+  },
+  "Base/Game/GameCore/Unit.cs::getEffectUnits": {
+    "hash": "0075fd01821a7b30",
+    "line": 4774
+  },
+  "Base/Game/GameCore/Unit.cs::makeDead": {
+    "hash": "ed5c09087d445431",
+    "line": 1682
+  }
+}

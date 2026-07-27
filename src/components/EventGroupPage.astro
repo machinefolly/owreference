@@ -1,0 +1,390 @@
+---
+// Renders ONE exploration-event group (Ruins or Expeditions) from
+// src/data/events.json. The combined view was split into two tabs; both share
+// this component. Pass the group `sectionKey` plus page chrome; the lede is a
+// default slot so each page supplies its own intro copy.
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import RewardChip from '../components/RewardChip.astro';
+import ScaleHelp from '../components/ScaleHelp.astro';
+import OptionRaw from '../components/OptionRaw.astro';
+import { classifyYield } from '../lib/entities';
+import sections from '../data/events.json';
+import chainData from '../data/event-chains.json';
+const chainIndex = chainData.index as Record<string, any>;
+
+interface Props {
+  sectionKey: string;
+  title: string;
+  active: string;
+  pageMark: string;
+}
+const { sectionKey, title, active, pageMark } = Astro.props as Props;
+const base = import.meta.env.BASE_URL;
+
+const sec = sections.find(s => s.key === sectionKey)!;
+type EventStory = (typeof sec)['events'][number];
+
+function pct(p: number): string {
+  return (p * 100).toFixed(0) + '%';
+}
+
+// Chain targets (leadsTo / followsFrom / canLeadTo) may live on another page
+// (story-events category, harvest, study, the other exploration tab) or on this
+// one. {ext}=dedicated page, {cat}=story-events category part, else same-page id.
+function evHref(t: any): string {
+  if (t.ext) return `${base}${t.ext}#${t.anchor || t.id}`;
+  if (t.cat) return `${base}events/${t.cat}#${t.id}`;
+  return `#${t.id}`;
+}
+
+function rewardYield(r: any): string | null {
+  return (r.yield || classifyYield(r.text || '') || null) as string | null;
+}
+function cardYield(ev: EventStory): string {
+  for (const g of ev.guaranteed) { const y = rewardYield(g); if (y) return y.toLowerCase(); }
+  for (const o of ev.options)
+    for (const oc of o.outcomes)
+      for (const r of oc.rewards) { const y = rewardYield(r); if (y) return y.toLowerCase(); }
+  return 'misc';
+}
+
+function searchBlob(ev: EventStory): string {
+  return [
+    ev.name, ev.trigger, ev.dlc, ...ev.conditions, ...ev.guaranteed.map((g: any) => g.text),
+    ...ev.options.flatMap(o => [
+      o.text, ...o.requirements.map((r: any) => r.label),
+      ...o.outcomes.flatMap(oc => oc.rewards.map((r: any) => r.text)),
+      ...((o as any).leadsTo || []).map((t: any) => t.name),
+      ...((o as any).canLeadTo || []).map((t: any) => t.name),
+    ]),
+    ...((ev as any).followsFrom || []).map((f: any) => f.name),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+const followups = sec.events.filter(e => e.isFollowup).length;
+---
+
+<Base title={title} active={active} pageMark={pageMark} pageStats={[
+  { label: 'events', value: sec.events.length },
+  ...(followups ? [{ label: 'follow-ups', value: followups }] : []),
+]}>
+  <p class="lede"><slot /></p>
+
+  <ScaleHelp />
+
+  <div class="evt-filter">
+    <input type="search" id="evt-search" class="evt-filter__search"
+           placeholder="Filter events — name, reward, condition…" autocomplete="off"
+           aria-label="Filter events" />
+    <div class="mode-toggle" role="radiogroup" aria-label="Detail level">
+      <button type="button" class="mode-toggle__btn is-active" data-evmode="raw" role="radio" aria-checked="true">Raw XML</button>
+      <button type="button" class="mode-toggle__btn" data-evmode="human" role="radio" aria-checked="false">Humanized</button>
+    </div>
+  </div>
+  <p class="evt-filter__note" id="evt-note" hidden></p>
+
+  <p class="evt-caveat">⚠ <b>Weights are not in-game odds.</b> Each story is gated by character/empire conditions (some
+  hidden in-game), so its real frequency is filtered in ways the XML can't predict — community analytics differ a lot
+  from raw weights. Treat the weight as the XML knob, not a probability.</p>
+
+  <div class="evt-list evtmode" data-mode="raw" id="evtmode">
+    {sec.events.map(ev => (
+      <details class={`evt yield-${cardYield(ev)}`} id={ev.id} data-search={searchBlob(ev)}>
+        <summary class="evt__summary">
+          <span class="evt__name">{ev.name}</span>
+          <span class="evt__meta">
+            <span class="chip--trigger">{ev.trigger}</span>
+            <span
+              class={`chip--cm ${(ev as any).cmEligible !== false ? 'chip--cm-yes' : 'chip--cm-no'}`}
+              title={(ev as any).cmEligible !== false
+                ? 'Eligible in Competitive Mode'
+                : 'Excluded when Competitive Events is on (Competitive Mode tournaments)'}
+            >CM {(ev as any).cmEligible !== false ? '✓' : '✗'}</span>
+            {ev.timing?.minTurns && <span class="chip--time chip--turn" title="Earliest turn this event can fire (its own minimum, or its event class's)">Turn {ev.timing.minTurns}+</span>}
+            {ev.dlc && <span class="chip--dlc" title="Requires DLC / content pack">{ev.dlc}</span>}
+            {(ev as any).followsFrom && (ev as any).followsFrom.length > 0
+              ? <span class="chip--chain" title="Fires as a follow-up in a chain">⛓ follow-up</span>
+              : (ev.weight != null && <span class="evt__share" title="Raw iWeight — NOT a probability (see caveat above)">weight {ev.weight}</span>)}
+          </span>
+        </summary>
+        <div class="evt__body">
+          {chainIndex[ev.id] && (
+            <a class="evt__chainmap" href={`${base}events/chains/${chainIndex[ev.id].slug}#${ev.id}`}>
+              <span class="evt__chainmap__ico">⛓</span>
+              <span>Part of the <b>{chainIndex[ev.id].title}</b> chain — {chainIndex[ev.id].size} events
+                {chainIndex[ev.id].branches > 0 ? `, ${chainIndex[ev.id].branches} branch point${chainIndex[ev.id].branches === 1 ? '' : 's'}` : ''}</span>
+              <span class="evt__chainmap__go">view map →</span>
+            </a>
+          )}
+          {(ev as any).followsFrom && (ev as any).followsFrom.length > 0 && (
+            <p class="evt__chain evt__chain--from">
+              ⛓ Follows from:{' '}
+              {(ev as any).followsFrom.map((f: any, i: number) => (
+                <>{i > 0 ? ', ' : ''}<a href={evHref(f)}>{f.name}</a></>
+              ))}
+            </p>
+          )}
+          {(ev.prob || ev.conditions.length > 0 || (ev.timing && (ev.timing.repeat || ev.timing.maxTurns || ev.timing.minLeader || ev.timing.law || ev.timing.minOpponentLevel))) && (
+            <div class="evt__tags">
+              {ev.prob && <span class="chip--time" title="Chance this story is added to the pool on an eligible turn">{ev.prob}% to appear</span>}
+              {ev.timing.repeat && <span class="chip--time">{ev.timing.repeat}</span>}
+              {ev.timing.maxTurns && <span class="chip--time">Before turn {ev.timing.maxTurns}</span>}
+              {ev.timing.minLeader && <span class="chip--time">Leader {ev.timing.minLeader}+</span>}
+              {ev.timing.law && <span class="chip--time">Law: {ev.timing.law}</span>}
+              {ev.timing.minOpponentLevel && <span class="chip--time">{ev.timing.minOpponentLevel}+</span>}
+              {ev.conditions.map(c => <span class="chip--cond">{c}</span>)}
+            </div>
+          )}
+
+          {ev.guaranteed.length > 0 && (
+            <div class="evt__guaranteed">
+              <span class="evt__label">Always</span>
+              {ev.guaranteed.map((g: any) => <RewardChip reward={g} />)}
+            </div>
+          )}
+
+          {ev.options.length > 0 && (
+            <ul class="evt__opts">
+              {ev.options.map((o: any) => (
+                <li class="opt">
+                  <div class="opt__text">
+                    <span class="opt__bullet">▸</span>
+                    <LinkedText text={o.text || 'Resolve'} />
+                    {o.requirements.map((r: any) => (
+                      <span class="chip--req ev-human has-tip" data-tip-title="Requirement"
+                            data-tip={(r.tip || []).join('\n')} tabindex="0">{r.label}</span>
+                    ))}
+                  </div>
+                  <div class="opt__outcomes ev-human">
+                    {o.outcomes.map((oc: any) => (
+                      <div class="oc">
+                        {oc.probability < 1 && <span class="oc__prob">{pct(oc.probability)}</span>}
+                        <div class="oc__rewards">
+                          {oc.rewards.map((r: any) => <RewardChip reward={r} />)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {o.raw && <OptionRaw raw={o.raw} />}
+                  {o.leadsTo && o.leadsTo.length > 0 && (
+                    <div class="opt__leads">
+                      ↳ may trigger:{' '}
+                      {o.leadsTo.map((t: any, i: number) => (
+                        <>{i > 0 ? ', ' : ''}<a href={evHref(t)}>{t.name}</a></>
+                      ))}
+                    </div>
+                  )}
+                  {o.canLeadTo && o.canLeadTo.length > 0 && (
+                    <div class="opt__leads opt__leads--maybe"
+                         title="This choice grants a memory these stories require — it makes them eligible, it does not guarantee they fire.">
+                      ◇ may enable:{' '}
+                      {o.canLeadTo.map((t: any, i: number) => (
+                        <>{i > 0 ? ', ' : ''}<a href={evHref(t)}>{t.name}</a></>
+                      ))}
+                    </div>
+                  )}
+                  {!(o.canLeadTo && o.canLeadTo.length > 0) &&
+                    (o.outcomes || []).some((oc: any) => (oc.rewards || []).some((r: any) => r.note)) && (
+                    <div class="opt__leads opt__leads--dead"
+                         title="The game shows '[Could lead to future Events]' for any memory grant, but no event in the current data requires this memory.">
+                      ◇ grants a memory no event currently keys off
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {ev.url && (
+            <a class="evt__url" href={ev.url.startsWith('http') ? ev.url : `https://${ev.url}`} target="_blank" rel="noopener noreferrer">
+              Background reading ↗
+            </a>
+          )}
+        </div>
+      </details>
+    ))}
+  </div>
+
+  <script is:inline>
+    (function () {
+      const search = document.getElementById('evt-search');
+      const note = document.getElementById('evt-note');
+      const cards = Array.from(document.querySelectorAll('.evt'));
+      function apply() {
+        const q = (search.value || '').trim().toLowerCase();
+        let shown = 0;
+        for (const card of cards) {
+          const ok = !q || (card.dataset.search || '').includes(q);
+          card.hidden = !ok;
+          if (ok) shown++;
+        }
+        if (q) {
+          note.hidden = false;
+          note.textContent = shown === 0
+            ? 'No events match “' + search.value + '”.'
+            : shown + ' event' + (shown === 1 ? '' : 's') + ' match “' + search.value + '”.';
+        } else {
+          note.hidden = true;
+        }
+      }
+      search.addEventListener('input', apply);
+
+      // Deep links (#EVENTSTORY_…) land on a <details> card — open it so the
+      // follow-up/lead-to link actually reveals the target event.
+      function openHash() {
+        const id = decodeURIComponent(location.hash.slice(1));
+        if (!id) return;
+        const el = document.getElementById(id);
+        if (el && el.tagName === 'DETAILS') { el.open = true; el.scrollIntoView(); }
+      }
+      window.addEventListener('hashchange', openHash);
+      openHash();
+    })();
+  </script>
+
+  <script is:inline>
+    (function () {
+      const root = document.getElementById('evtmode');
+      const btns = Array.from(document.querySelectorAll('.mode-toggle__btn'));
+      if (!root || !btns.length) return;
+      btns.forEach((btn) => btn.addEventListener('click', () => {
+        root.setAttribute('data-mode', btn.getAttribute('data-evmode'));
+        btns.forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle('is-active', on);
+          b.setAttribute('aria-checked', String(on));
+        });
+      }));
+    })();
+  </script>
+
+  <style>
+    .evt-caveat {
+      font-size: 0.8rem; color: var(--text-dim); line-height: 1.45; max-width: 80ch;
+      margin: 0 0 1rem; padding: 0.5rem 0.7rem; border-radius: var(--radius-lg);
+      border: 1px solid color-mix(in srgb, #d4a24e 35%, var(--border));
+      background: color-mix(in srgb, #d4a24e 8%, transparent);
+    }
+    .evt-caveat b { color: var(--text); }
+
+    .mode-toggle { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; }
+    .mode-toggle__btn { font-family: var(--font-display); font-size: 0.76rem; padding: 0.32rem 0.7rem; background: var(--bg-elev); color: var(--text-dim); border: none; cursor: pointer; }
+    .mode-toggle__btn + .mode-toggle__btn { border-left: 1px solid var(--border-strong); }
+    .mode-toggle__btn:hover { color: var(--text); }
+    .mode-toggle__btn.is-active { background: color-mix(in srgb, var(--accent) 28%, var(--bg-elev) 72%); color: var(--text); }
+
+    .evtmode[data-mode='raw'] .ev-human { display: none; }
+    .evtmode[data-mode='human'] .ev-raw { display: none; }
+
+    .lede { color: var(--text-dim); font-size: 0.92rem; line-height: 1.55; max-width: 80ch; margin: 0 0 0.9rem; }
+    .lede a { color: var(--accent); }
+
+    .evt-filter { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+    .evt-filter__search {
+      flex: 1 1 280px; min-width: 220px;
+      background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+      color: var(--text); padding: 0.5rem 0.8rem; font-size: 0.88rem; font-family: var(--font-body);
+    }
+    .evt-filter__search:focus { outline: none; border-color: var(--accent); }
+    .evt-filter__note { font-size: 0.8rem; color: var(--text-faint); margin: 0 0 0.6rem; font-style: italic; }
+
+    .evt-list { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.9rem; }
+    .evt {
+      border: 1px solid var(--border);
+      border-left: 3px solid color-mix(in srgb, var(--yield-bg, var(--accent)) 70%, transparent);
+      border-radius: var(--radius-lg); background: var(--bg-elev); overflow: hidden;
+    }
+    .evt[open] { background: var(--bg-elev-2); }
+    .evt__summary {
+      display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+      padding: 0.5rem 0.8rem; cursor: pointer; list-style: none; user-select: none;
+    }
+    .evt__summary::-webkit-details-marker { display: none; }
+    .evt__summary::before {
+      content: '▸'; color: var(--text-faint); font-size: 0.8rem; transition: transform 0.12s; flex-shrink: 0;
+    }
+    .evt[open] .evt__summary::before { transform: rotate(90deg); }
+    .evt__summary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    .evt__name { font-family: var(--font-display); font-weight: 600; font-size: 0.92rem; color: var(--text); }
+    .evt__meta { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-left: auto; }
+    .evt__share {
+      font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600;
+      color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+      padding: 0.08rem 0.4rem; border-radius: 5px;
+    }
+    .chip--trigger {
+      font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.02em;
+      color: var(--text-dim); background: var(--bg); border: 1px solid var(--border);
+      padding: 0.08rem 0.46rem; border-radius: 5px;
+    }
+    .chip--dlc {
+      font-size: 0.66rem; color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+      border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+      padding: 0.06rem 0.44rem; border-radius: 5px;
+    }
+    /* Competitive-Mode eligibility badge (green = eligible, red = excluded) */
+    .chip--cm { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.02em; padding: 0.06rem 0.42rem; border-radius: 5px; border: 1px solid transparent; }
+    .chip--cm-yes { color: #6ba368; background: color-mix(in srgb, #6ba368 14%, var(--bg-elev)); border-color: color-mix(in srgb, #6ba368 40%, transparent); }
+    .chip--cm-no  { color: #c25555; background: color-mix(in srgb, #c25555 14%, var(--bg-elev)); border-color: color-mix(in srgb, #c25555 40%, transparent); }
+    /* Earliest-fire turn marker (promoted to the summary row) */
+    .chip--turn { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev)); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+    .chip--cond { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); padding: 0.06rem 0.42rem; font-size: 0.68rem; border-radius: 5px; }
+    .chip--time { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); padding: 0.06rem 0.42rem; font-size: 0.68rem; border-radius: 5px; font-family: var(--font-mono); letter-spacing: 0.02em; }
+    .chip--req { background: color-mix(in srgb, #6b5ea6 24%, var(--bg-elev)); color: var(--text); border: 1px solid color-mix(in srgb, #6b5ea6 45%, transparent); padding: 0.04rem 0.4rem; font-size: 0.66rem; margin-left: 0.4rem; border-radius: 5px; }
+    .chip--req.has-tip { cursor: help; }
+
+    .evt__body { padding: 0 0.9rem 0.7rem 1.6rem; }
+    .evt__tags { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+    .evt__guaranteed { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+    .evt__label, .oc__prob { font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+
+    .evt__opts { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+    .opt { border-top: 1px dashed var(--border); padding-top: 0.45rem; }
+    .opt:first-child { border-top: 0; padding-top: 0; }
+    .opt__text { font-size: 0.85rem; color: var(--text); margin-bottom: 0.3rem; display: flex; align-items: baseline; gap: 0.35rem; flex-wrap: wrap; }
+    .opt__bullet { color: var(--accent); font-size: 0.7rem; }
+    .opt__outcomes { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 1rem; }
+    .oc { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .oc__prob {
+      font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; color: var(--text-dim);
+      min-width: 2.4rem; text-align: right;
+    }
+    .oc__rewards { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .oc__rewards .chip, .evt__guaranteed .chip { font-size: 0.72rem; padding: 0.08rem 0.45rem; }
+
+    .evt__url { display: inline-block; margin-top: 0.5rem; font-size: 0.76rem; color: var(--accent); font-family: var(--font-mono); }
+
+    /* Chains */
+    .chip--chain {
+      font-family: var(--font-mono); font-size: 0.68rem; color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+      border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+      padding: 0.06rem 0.44rem; border-radius: 5px;
+    }
+    .evt__chain {
+      font-size: 0.78rem; color: var(--text-dim); margin: 0 0 0.5rem;
+      padding: 0.25rem 0.5rem; border-left: 2px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, transparent);
+    }
+    .evt__chain a, .opt__leads a { color: var(--accent); }
+    .evt__chainmap {
+      display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.6rem;
+      padding: 0.4rem 0.6rem; text-decoration: none; font-size: 0.8rem; color: var(--text-dim);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+      border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent) 7%, transparent);
+    }
+    .evt__chainmap:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .evt__chainmap b { color: var(--text); font-family: var(--font-display); }
+    .evt__chainmap__ico { font-size: 0.95rem; }
+    .evt__chainmap__go { margin-left: auto; flex-shrink: 0; color: var(--accent); font-family: var(--font-mono); font-size: 0.72rem; }
+    .opt__leads {
+      margin-top: 0.3rem; padding-left: 1rem; font-size: 0.78rem; color: var(--text-dim);
+    }
+    /* Memory-eligibility hints, not guaranteed chains — dimmer than leadsTo. */
+    .opt__leads--maybe { color: var(--text-faint); cursor: help; }
+    .opt__leads--dead { color: var(--text-faint); opacity: 0.75; font-style: italic; cursor: help; }
+    .opt__leads--maybe a { color: color-mix(in srgb, var(--accent) 70%, var(--text-faint)); }
+  </style>
+</Base>

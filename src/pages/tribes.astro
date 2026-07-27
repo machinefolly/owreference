@@ -1,0 +1,354 @@
+---
+import Base from '../layouts/Base.astro';
+import tribes from '../data/tribes.json';
+import { existsSync } from 'node:fs';
+
+const base = import.meta.env.BASE_URL;
+// Build-time art lookup: some tribes (Anarchy, Barbarians, Raiders) and a few
+// tribal-only units ship no extracted sprite, so fall back / omit instead of 404.
+const crestSrc = (slug: string) =>
+  existsSync(`public/img/tribes/${slug}.png`) ? `${base}img/tribes/${slug}.png` : `${base}img/tribes/generic.png`;
+const unitIconSrc = (icon: string) =>
+  existsSync(`public/img/icons/units/${icon}.png`) ? `${base}img/icons/units/${icon}.png` : null;
+
+
+// Combat tribes (Danes, Gauls, Huns, Numidians, Scythians, Thracians,
+// Vandals) field a full roster and become the matrix columns. The
+// generic enemy states (Anarchy, Barbarians, Raiders, Rebels) have no
+// roster and no diplomacy — they're a small flavor list below.
+type Tribe = typeof tribes[number];
+type RosterUnit = {
+  id: string; name: string; icon: string; glyph: string;
+  mounted: boolean; strength: number;
+  branch: string; special: boolean;
+  promoId: string | null; promoName: string | null;
+  promos: { id: string; name: string | null; unique: boolean }[];
+};
+
+const combat = tribes
+  .filter(t => (t as any).combat && (t as any).roster?.length)
+  .sort((a, b) => a.name.localeCompare(b.name)) as Tribe[];
+const generic = tribes
+  .filter(t => !((t as any).combat && (t as any).roster?.length))
+  .sort((a, b) => a.name.localeCompare(b.name)) as Tribe[];
+
+// Branch sections × strength rows. Only emit a (branch, strength) row
+// if at least one tribe fields a unit there. Strengths span 3–6.
+// Mounted is an attribute (shown as a badge), not a branch — mounted
+// units are still Melee or Ranged.
+const BRANCHES = ['Melee', 'Ranged'];
+const STRENGTHS = [3, 4, 5, 6];
+
+function unitsAt(t: Tribe, branch: string, strength: number): RosterUnit[] {
+  const r = ((t as any).roster ?? []) as RosterUnit[];
+  return r.filter(u => u.branch === branch && u.strength === strength);
+}
+
+type Section = { branch: string; rows: number[] };
+const sections: Section[] = [];
+for (const branch of BRANCHES) {
+  const rows = STRENGTHS.filter(s =>
+    combat.some(t => unitsAt(t, branch, s).length > 0)
+  );
+  if (rows.length) sections.push({ branch, rows });
+}
+
+const specialCount = combat.reduce(
+  (n, t) => n + (((t as any).roster ?? []) as RosterUnit[]).filter(u => u.special).length,
+  0,
+);
+---
+
+<Base
+  title="Tribes"
+  active="tribes"
+  description="The seven combat tribes of Old World side-by-side — every unit they field by branch and strength, with each tribe's unique upgrade troops and the free promotion they carry. Pulled XML-canonical from the game's own files."
+>
+  <div class="page-meta">
+    <h1 class="page-title">Tribes</h1>
+    <div class="page-stats">
+      <span class="stat"><b>{combat.length}</b> combat tribes</span>
+      <span class="stat"><b>{specialCount}</b> unique units</span>
+      <span class="stat"><b>{generic.length}</b> generic states</span>
+    </div>
+  </div>
+
+  <p class="lede">
+    Each combat tribe fields a shared core of Marauders, Skirmishers and
+    Nomads — but tops out with its own signature upgrade unit, and that
+    unit alone ships with a free promotion no other troop gets.
+  </p>
+
+  <div class="grid" id="tribes-grid">
+    <div class="grid__scroll">
+      <table class="ntbl">
+        <colgroup>
+          <col class="ntbl__rowlabel-col" />
+          {combat.map(t => <col data-tribe={t.slug} />)}
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner">
+              <span class="rowlabel__small">Tribe →</span>
+              <span class="rowlabel__big">Strength ↓</span>
+            </th>
+            {combat.map(t => (
+              <th
+                class="nhdr"
+                data-tribe={t.slug}
+                title={t.id}
+                id={t.slug}
+                style={(t as any).color ? `--nation-bg: ${(t as any).color}` : undefined}
+              >
+                <div class="nhdr__inner">
+                  <a class="nhdr__link" href={`${base}tribes/${t.slug}`}>
+                    <img
+                      class="nhdr__crest"
+                      src={crestSrc(t.slug)}
+                      alt=""
+                      onerror="this.style.visibility='hidden'"
+                    />
+                    <span class="nhdr__name">{t.name}</span>
+                  </a>
+                  {t.nickname && <span class="nhdr__nick">{t.nickname}</span>}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sections.map(sec => (
+            <>
+              <tr class="srow">
+                <th class="srow__th" colspan={combat.length + 1}>{sec.branch}</th>
+              </tr>
+              {sec.rows.map(strength => (
+                <tr>
+                  <th class="rowlabel" scope="row">Str {strength}</th>
+                  {combat.map(t => {
+                    const us = unitsAt(t, sec.branch, strength);
+                    if (us.length === 0) {
+                      return (
+                        <td class="cell is-empty" data-tribe={t.slug}>
+                          <span class="cell__dash">—</span>
+                        </td>
+                      );
+                    }
+                    // Numidians/Scythians run two mounted lines, so a
+                    // (branch, strength) cell can hold two units —
+                    // prefer the special one first, list both.
+                    const sorted = [...us].sort(
+                      (a, b) => Number(b.special) - Number(a.special)
+                    );
+                    const anySpecial = sorted.some(u => u.special);
+                    return (
+                      <td
+                        class={`cell tcell ${anySpecial ? 'tcell--special' : ''}`}
+                        data-tribe={t.slug}
+                      >
+                        {sorted.map(u => (
+                          <div class={`tunit ${u.special ? 'tunit--special' : ''}`}>
+                            <span class="tunit__glyphwrap">
+                              {unitIconSrc(u.icon) && (
+                                <img
+                                  class="tunit__icon"
+                                  src={unitIconSrc(u.icon)}
+                                  alt=""
+                                />
+                              )}
+                              {u.mounted && (
+                                <img
+                                  class="tunit__mounted"
+                                  src={`${base}img/icons/unit_traits/mounted.png`}
+                                  alt="mounted" title="Mounted"
+                                  onerror="this.style.display='none'"
+                                />
+                              )}
+                            </span>
+                            <div class="tunit__meta">
+                              <span class="tunit__name">{u.name}</span>
+                              {u.promos.map(p => (
+                                <span class={`tunit__promo ${p.unique ? 'tunit__promo--unique' : ''}`}>
+                                  <img
+                                    class="tunit__promo-icon"
+                                    src={`${base}img/icons/effects/${p.id.toLowerCase().replace('effectunit_', '')}.png`}
+                                    alt=""
+                                    onerror="this.style.visibility='hidden'"
+                                  />
+                                  {p.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="xref">
+    → <a href={`${base}camp-spawning`}>How camps spawn units</a> — the spawn
+    countdown, the pause rule (why killing units near a camp restarts the
+    timer), and the develop timers, transcribed from the game source.
+  </p>
+
+  {generic.length > 0 && (
+    <section class="tribe-generic">
+      <h2 class="tribe-generic__h">Generic enemy states</h2>
+      <ul class="tribe-generic__list">
+        {generic.map(t => (
+          <li class="tribe-generic__item">
+            <img
+              class="tribe-generic__crest"
+              src={crestSrc(t.slug)}
+              alt=""
+              onerror="this.style.visibility='hidden'"
+            />
+            <span class="tribe-generic__name">{t.name}</span>
+            <span class="tribe-generic__sep">·</span>
+            <span class="tribe-generic__dim">no diplomacy · no special unit</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+</Base>
+
+<style>
+  .lede {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--text-soft);
+    max-width: 60ch;
+    margin: 0.5rem 0 1.5rem 0;
+  }
+
+  /* Cross-link to the camp-spawning mechanics page */
+  .xref { font-size: 0.86rem; line-height: 1.55; color: var(--text-dim); max-width: 72ch; margin: 1.6rem 0 0; }
+  .xref a { color: var(--gold-soft); }
+
+  /* Tribe column header — nickname under the name, mirroring the
+     card's title block. Color comes from --nation-bg (set inline per
+     tribe from the XML-resolved hex), reusing .nhdr's underline strip. */
+  .nhdr__nick {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 0.78rem;
+    color: var(--text-faint);
+    line-height: 1;
+  }
+
+  /* Roster cell — one or two units stacked. Background stays neutral
+     per the design rule (tribe color lives only in the header strip);
+     special units get a gold edge + inline promo. */
+  .tcell { padding: 0.28rem 0.6rem; }
+  .tcell--special {
+    box-shadow: inset 3px 0 0 var(--gold-deep);
+  }
+
+  .tunit {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+  .tunit + .tunit {
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border-faint);
+  }
+  .tunit__glyphwrap {
+    position: relative;
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    display: inline-block;
+  }
+  .tunit__icon {
+    width: 28px; height: 28px;
+    object-fit: contain;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+  }
+  /* Mounted is an attribute, not a branch — small badge on the glyph. */
+  .tunit__mounted {
+    position: absolute;
+    right: -4px; bottom: -3px;
+    width: 14px; height: 14px;
+    object-fit: contain;
+    opacity: 0.85;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
+  }
+  .tunit__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+  .tunit__name {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.86rem;
+    line-height: 1.1;
+    color: var(--text);
+  }
+  .tunit--special .tunit__name { color: var(--gold-soft); }
+  .tunit__promo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    line-height: 1.1;
+    margin-right: 0.4rem;
+  }
+  /* The tribe-unique signature promo vs the generic XP-tier one. */
+  .tunit__promo--unique { color: var(--gold-soft); }
+  .tunit__promo-icon {
+    width: 13px; height: 13px;
+    object-fit: contain;
+    opacity: 0.9;
+  }
+
+  .tribe-generic {
+    margin-top: 1.75rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .tribe-generic__h {
+    font-family: var(--font-ui);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--gold-soft);
+    font-weight: 500;
+    margin: 0 0 0.6rem 0;
+  }
+  .tribe-generic__list {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 0.3rem;
+  }
+  .tribe-generic__item {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.88rem;
+    color: var(--text-soft);
+  }
+  .tribe-generic__crest {
+    width: 20px; height: 20px;
+    object-fit: contain;
+    opacity: 0.7;
+  }
+  .tribe-generic__name {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: var(--text);
+  }
+  .tribe-generic__sep { color: var(--border); }
+  .tribe-generic__dim { color: var(--text-faint); font-size: 0.8rem; }
+</style>

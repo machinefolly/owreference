@@ -1,0 +1,570 @@
+---
+import Base from '../layouts/Base.astro';
+import data from '../data/stat-scaling.json';
+import { yieldColors } from '../lib/entities';
+
+const base = import.meta.env.BASE_URL;
+const yieldIcon = (key: string) => `${base}img/icons/yields/${key}.png`;
+
+const { ratings, ratingEquivalent, stats, agentCalc } = data as any;
+
+// Union of role keys across stats, in first-seen order — the graph's role
+// picker shows them all and hides the ones the active stat doesn't have
+// (council seats differ per rating: Spymaster draws on Wisdom+Discipline+Courage, etc.).
+const allRoles: { key: string; label: string }[] = [];
+for (const s of stats as any[])
+  for (const r of s.roles)
+    if (!allRoles.some((x) => x.key === r.key)) allRoles.push({ key: r.key, label: r.label });
+
+// Color each stat by the yield it GIVES (site convention), not the rating's
+// in-game accent. The game's Wisdom rating is green, but Wisdom → Science, and
+// Science is purple everywhere else on the site; likewise Discipline → Money.
+// yieldColors is the same dark-mode-adapted registry the rest of the site uses.
+const statColor = (s: any): string =>
+  (yieldColors as Record<string, string>)[String(s.yield).toUpperCase()] || s.color;
+
+// Format a Leader (flat-yield) value: signed, drop trailing .0.
+function fmtYield(v: number): string {
+  if (v === 0) return '0';
+  const s = Number.isInteger(v) ? String(v) : v.toFixed(1);
+  return (v > 0 ? '+' : '') + s;
+}
+function fmtPct(v: number): string {
+  return v === 0 ? '0' : (v > 0 ? '+' : '') + v + '%';
+}
+function fmtFlat(v: number): string {
+  return v === 0 ? '0' : (v > 0 ? '+' : '') + v;
+}
+function fmtCell(role: any, v: number): string {
+  if (role.kind === 'yield') return fmtYield(v);
+  if (role.kind === 'flat') return fmtFlat(v);
+  return fmtPct(v);
+}
+
+// Compact payload for the interactive graph: per stat, each role's Base and
+// Competitive series (one value per rating, in `ratings` order).
+// Payload for the agent-yield calculator: per-stat linear percent (rating.xml
+// aiYieldAgentPercent — 5 for all four), the Schemer trait's flat +10
+// (trait.xml iAgentModifier) and the opinion rate modifiers (opinionCharacter.xml).
+const agentData = {
+  stats: (stats as any[]).map((s) => ({
+    slug: s.slug, name: s.name, yield: s.yield, yieldLabel: s.yieldLabel,
+    percent: s.baseRates.agent, color: statColor(s),
+  })),
+  schemerModifier: agentCalc.schemerModifier,
+  opinions: agentCalc.opinions,
+};
+
+const graphData = {
+  ratings,
+  stats: (stats as any[]).map((s) => ({
+    slug: s.slug, name: s.name, color: statColor(s), yield: s.yield,
+    roles: s.roles.map((r: any) => ({ key: r.key, label: r.label, effect: r.effect, kind: r.kind })),
+    base: Object.fromEntries(s.roles.map((r: any) => [r.key, s.base.map((row: any) => row[r.key])])),
+    cm: Object.fromEntries(s.roles.map((r: any) => [r.key, s.cm.map((row: any) => row[r.key])])),
+  })),
+};
+---
+
+<Base
+  title="Stat Scaling"
+  active="stat-scaling"
+  pageMark="📈"
+  description="How each character rating (Wisdom, Charisma, Courage, Discipline) scales into yields and combat bonuses, by role and rating value (−3 to +15), computed directly from the game's own formula — including the Chancellor, Spymaster and Ambassador council seats and an agent yield calculator. Compare Non-competitive (triangular) vs Competitive Mode (linear) scaling side by side. Every number is derived from rating.xml, council.xml and yield.xml via the triangle formula in the game code — not the legacy spreadsheet."
+  pageStats={[
+    { label: 'stats', value: stats.length },
+    { label: 'roles', value: allRoles.length },
+    { label: 'rating range', value: `${ratings[0]}…${ratings[ratings.length - 1]}` },
+    { label: 'modes', value: 2 },
+  ]}
+>
+  <section class="scale-intro">
+    <p>
+      A character's <b>rating</b> in a skill turns into ongoing effects that depend on the
+      <b>role</b> they hold. The amounts come from the game's rating formula — a triangular curve
+      (<code>triangleOffset</code> / <code>triangleBoost</code>) applied to each rating's base rate in
+      <code>rating.xml</code>. <b>Competitive Mode</b> (the <i>Lower Character Yields</i> option) swaps the
+      triangular curve for a <b>linear</b> one through an equivalent rating of {ratingEquivalent},
+      flattening the payoff of extreme ratings.
+    </p>
+    <ul class="scale-roles">
+      <li><b>Leader</b> — flat yield of the stat's signature yield (its own <code>iTriangleOffset</code>).</li>
+      <li><b>Governor</b> — percent boost to that yield (triangle-boosted).</li>
+      <li><b>Agent</b> — percent boost to that yield (linear with rating; see the <a href="#agent-calc">calculator below</a>).</li>
+      <li><b>General</b> — a combat bonus (Crit / Defense / Attack / Unit XP), triangle-boosted.</li>
+      <li><b>Council seats</b> — <b>Chancellor</b>, <b>Spymaster</b> and <b>Ambassador</b> each turn specific
+        ratings into flat yields (<code>council.xml</code>), scaled by the plain triangle
+        R·(R+1)/2 with no offset. Some are empire-wide per turn, some are <i>per city</i>
+        (marked <code>/city</code> in the column header). The Grand Vizier seat grants no rating yields.</li>
+    </ul>
+    <p class="scale-note">
+      These are the raw outputs of the game formula and can differ from the legacy spreadsheet's
+      normalised display. <b>Competitive Mode is shown by default.</b>
+    </p>
+  </section>
+
+  <section class="sg-panel" id="sg-panel">
+    <div class="sg-controls">
+      <div class="seg" id="sg-stats" role="tablist" aria-label="Stat">
+        {stats.map((s: any, i: number) => (
+          <button type="button" class={`seg__btn ${i === 0 ? 'is-active' : ''}`} data-stat={s.slug}>{s.name}</button>
+        ))}
+      </div>
+      <div class="seg" id="sg-roles" role="tablist" aria-label="Role">
+        {allRoles.map((r, i) => (
+          <button type="button" class={`seg__btn ${i === 0 ? 'is-active' : ''}`} data-role={r.key}>
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </div>
+    <div class="sg-head">
+      <span class="sg-title" id="sg-title"></span>
+      <span class="sg-legend">
+        <span class="sg-legend__item"><span class="sg-swatch sg-swatch--cm"></span>Competitive</span>
+        <span class="sg-legend__item"><span class="sg-swatch sg-swatch--base"></span>Non-competitive</span>
+      </span>
+    </div>
+    <svg id="sg-graph" class="sg-graph" viewBox="0 0 640 320" role="img" aria-label="Rating scaling curve"></svg>
+    <p class="sg-readout" id="sg-readout"></p>
+  </section>
+
+  <script type="application/json" id="sg-data" set:html={JSON.stringify(graphData)}></script>
+
+  <div class="mode-toggle" role="radiogroup" aria-label="Scaling mode">
+    <button type="button" class="mode-toggle__btn is-active" data-mode="cm" role="radio" aria-checked="true">Competitive Mode</button>
+    <button type="button" class="mode-toggle__btn" data-mode="base" role="radio" aria-checked="false">Non-competitive</button>
+  </div>
+
+  <div class="scaling" id="scaling" data-mode="cm">
+    {stats.map((stat: any) => (
+      <section class={`scale-stat yield-${stat.yield}`}>
+        <header class="scale-stat__hdr">
+          <img class="scale-stat__ico" src={yieldIcon(stat.yield)} alt="" onerror="this.style.display='none'" />
+          <h2 class="scale-stat__name" style={`--stat-color:${statColor(stat)}`}>{stat.name}</h2>
+          <span class="scale-stat__yield">signature yield: <b>{stat.yieldLabel}</b></span>
+        </header>
+        <div class="grid">
+          <div class="grid__scroll">
+            <table class="ntbl stbl">
+              <colgroup>
+                <col class="stbl__rate-col" />
+                {stat.roles.map(() => <col />)}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="rowlabel rowlabel--corner"><span class="nhdr__name">Rating</span></th>
+                  {stat.roles.map((role: any) => (
+                    <th class="nhdr nhdr--col nhdr--num">
+                      <span class="nhdr__name">{role.label}</span>
+                      <span class="nhdr__effect">{role.effect}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              {['base', 'cm'].map((mode) => (
+                <tbody class={`tb tb--${mode}`}>
+                  {stat[mode].map((r: any) => (
+                    <tr class={r.rating === 0 ? 'is-zero' : ''}>
+                      <th class="rowlabel rowlabel--rate" scope="row">{r.rating > 0 ? `+${r.rating}` : r.rating}</th>
+                      {stat.roles.map((role: any) => {
+                        const v = r[role.key];
+                        const txt = fmtCell(role, v);
+                        // Tint by the yield the ROLE gives (council seats can give a
+                        // different yield than the stat's signature one); General stays misc.
+                        const tint = role.key === 'general' ? 'yield-misc' : `yield-${role.yield}`;
+                        return (
+                          <td class={`cell cell--num ${v === 0 ? 'is-empty' : tint} ${v < 0 ? 'is-neg' : ''}`}>
+                            <span class="numval">{txt}</span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
+            </table>
+          </div>
+        </div>
+      </section>
+    ))}
+  </div>
+
+  <section class="agent-sec" id="agent-calc">
+    <h2 class="agent-sec__title">Agent yields</h2>
+    <div class="scale-intro">
+      <p>
+        Agents unlock once a <b>Spymaster</b> is seated on your council. Courtiers, characters with the
+        <b>Hero</b> or <b>Schemer</b> archetype, and clergy of a world religion (those only in cities
+        following their religion) can be sent as agents into a foreign city; taking the job gives the
+        character +20 opinion of you.
+      </p>
+      <p>
+        Each turn the agent skims the <b>target city's base yields</b>
+        (<code>City.calculateAgentYield</code> / <code>InfoHelpers.getRatingYieldAgentPercent</code>):
+        every rating contributes <b>rating × 5%</b> of the city's base signature yield — Wisdom→Science,
+        Charisma→Civics, Courage→Training, Discipline→Money — all four at once. That percent is scaled by
+        the <b>agent's opinion of you</b> (Furious −200% … Friendly +100%, so a Friendly agent yields
+        double and an Angry one nothing), and a <b>Schemer</b> then adds a flat
+        <b>+{agentCalc.schemerModifier} percentage points</b> per yield — added <i>after</i> the opinion
+        scaling, so the Schemer bonus itself is never reduced (and works even at rating 0).
+      </p>
+      <p>
+        “Base” means <code>getBaseYieldNet</code> — the city's yield <i>before its percentage modifiers</i>,
+        so the owner's yield-% buildings, governor and specialists' modifiers don't multiply your take.
+        Agent scaling is already linear, so Competitive Mode doesn't change it.
+      </p>
+    </div>
+
+    <div class="ac-panel">
+      <div class="ac-controls">
+        <label class="ac-field">
+          <span class="ac-field__lab">Rating</span>
+          <select id="ac-stat">
+            {(agentData.stats as any[]).map((s, i) => (
+              <option value={s.slug} selected={i === 0}>{s.name} → {s.yieldLabel}</option>
+            ))}
+          </select>
+        </label>
+        <label class="ac-field">
+          <span class="ac-field__lab">Rating value</span>
+          <input type="number" id="ac-rating" value="4" min="-10" max="30" step="1" />
+        </label>
+        <label class="ac-field ac-field--check">
+          <span class="ac-field__lab">Schemer</span>
+          <input type="checkbox" id="ac-schemer" checked />
+        </label>
+        <label class="ac-field">
+          <span class="ac-field__lab">Agent's opinion of you</span>
+          <select id="ac-opinion">
+            {(agentData.opinions as any[]).map((o) => (
+              <option value={o.id} selected={o.modifier === 0}>{o.name} ({o.modifier > 0 ? '+' : ''}{o.modifier}%)</option>
+            ))}
+          </select>
+        </label>
+        <label class="ac-field">
+          <span class="ac-field__lab" id="ac-base-lab">City base Science</span>
+          <input type="number" id="ac-base" value="30" min="0" step="0.1" />
+        </label>
+      </div>
+      <p class="ac-result" id="ac-result"></p>
+      <p class="ac-breakdown" id="ac-breakdown"></p>
+      <p class="scale-note">
+        The math is the game's integer math (percents truncate toward zero; the yield is truncated to a
+        tenth). With a negative rating the opinion scaling flips sign, so a hostile agent hurts less —
+        and a friendly one helps less — when the rating is a penalty.
+      </p>
+    </div>
+  </section>
+
+  <script type="application/json" id="ac-data" set:html={JSON.stringify(agentData)}></script>
+
+  <script is:inline>
+    // Agent-yield calculator — a faithful port of
+    // InfoHelpers.getRatingYieldAgentPercent + City.calculateAgentYield:
+    //   pct = 5 · rating
+    //   pct = modify(pct, opinionMod · (rating < 0 ? −1 : 1))   [truncating int math]
+    //   pct += 10 if Schemer                                     [after opinion!]
+    //   yield = trunc(base(in tenths) · pct / 100) / 10
+    (function () {
+      const node = document.getElementById('ac-data');
+      if (!node) return;
+      let DATA; try { DATA = JSON.parse(node.textContent || '{}'); } catch { return; }
+      const byStat = Object.fromEntries(DATA.stats.map((s) => [s.slug, s]));
+      const oppByid = Object.fromEntries(DATA.opinions.map((o) => [o.id, o]));
+      const el = (id) => document.getElementById(id);
+      const statEl = el('ac-stat'), ratingEl = el('ac-rating'), schemerEl = el('ac-schemer'),
+            opinionEl = el('ac-opinion'), baseEl = el('ac-base'),
+            resultEl = el('ac-result'), breakEl = el('ac-breakdown'), baseLab = el('ac-base-lab');
+
+      // Utils.modify(v, m, allowNegative:true) — C# int division truncates toward zero.
+      const modify = (v, m) => (v === 0 || m === 0) ? v : Math.trunc(v * (m + 100) / 100);
+
+      function agentPercent(stat, rating, schemer, oppMod) {
+        let pct = stat.percent;           // 5 — nonzero, so the branch always runs
+        pct *= rating;
+        // yieldWarning: for a normal yield the sign flips when the rating is negative
+        if (oppMod !== 0) pct = modify(pct, oppMod * (rating < 0 ? -1 : 1));
+        if (schemer) pct += DATA.schemerModifier;
+        return pct;
+      }
+
+      function calc() {
+        const stat = byStat[statEl.value];
+        const rating = Math.trunc(Number(ratingEl.value) || 0);
+        const schemer = schemerEl.checked;
+        const opp = oppByid[opinionEl.value];
+        const base10 = Math.round((Number(baseEl.value) || 0) * 10);
+
+        baseLab.textContent = `City base ${stat.yieldLabel}`;
+
+        const pct = agentPercent(stat, rating, schemer, opp.modifier);
+        const y = Math.trunc(base10 * pct / 100) / 10;
+        const pctOther = agentPercent(stat, rating, !schemer, opp.modifier);
+        const yOther = Math.trunc(base10 * pctOther / 100) / 10;
+
+        const fmt = (v) => (v > 0 ? '+' : '') + (Number.isInteger(v) ? v : v.toFixed(1));
+        resultEl.innerHTML =
+          `<b style="color:${stat.color}">${fmt(y)} ${stat.yieldLabel}</b> per turn ` +
+          `<span class="ac-result__pct">(${pct}% of the city's base ${stat.yieldLabel})</span>`;
+
+        let steps = `${stat.percent} × ${rating} (${stat.name})`;
+        if (opp.modifier !== 0) {
+          const eff = opp.modifier * (rating < 0 ? -1 : 1);
+          steps += ` → ×${(100 + eff) / 100} (${opp.name})`;
+        }
+        if (schemer) steps += ` + ${DATA.schemerModifier} (Schemer)`;
+        steps += ` = ${pct}% · ${(base10 / 10).toFixed(1)} base ${stat.yieldLabel} → ${fmt(y)}/turn`;
+        steps += schemer
+          ? ` — without Schemer: ${fmt(yOther)}`
+          : ` — as a Schemer: ${fmt(yOther)}`;
+        breakEl.textContent = steps;
+      }
+
+      [statEl, ratingEl, schemerEl, opinionEl, baseEl].forEach((e) =>
+        e.addEventListener('input', calc));
+      calc();
+    })();
+  </script>
+
+  <script is:inline>
+    (function () {
+      const root = document.getElementById('scaling');
+      const btns = Array.from(document.querySelectorAll('.mode-toggle__btn'));
+      if (!root || !btns.length) return;
+      btns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const mode = btn.getAttribute('data-mode');
+          root.setAttribute('data-mode', mode);
+          btns.forEach((b) => {
+            const on = b === btn;
+            b.classList.toggle('is-active', on);
+            b.setAttribute('aria-checked', String(on));
+          });
+        });
+      });
+    })();
+  </script>
+
+  <script is:inline>
+    // Interactive rating-curve graph: pick a stat + role, see Competitive
+    // (linear) vs Non-competitive (triangular) scaling across rating −3..+15.
+    (function () {
+      const node = document.getElementById('sg-data');
+      const svg = document.getElementById('sg-graph');
+      if (!node || !svg) return;
+      let DATA; try { DATA = JSON.parse(node.textContent || '{}'); } catch { return; }
+      const ratings = DATA.ratings;
+      const byStat = Object.fromEntries(DATA.stats.map((s) => [s.slug, s]));
+      const titleEl = document.getElementById('sg-title');
+      const readoutEl = document.getElementById('sg-readout');
+      const statBtns = Array.from(document.querySelectorAll('#sg-stats .seg__btn'));
+      const roleBtns = Array.from(document.querySelectorAll('#sg-roles .seg__btn'));
+
+      function setSVG(el, inner) {
+        const doc = new DOMParser().parseFromString(
+          '<svg xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>', 'image/svg+xml');
+        el.replaceChildren(...Array.from(doc.documentElement.childNodes));
+      }
+      let statSlug = DATA.stats[0].slug, roleKey = 'leader', hoverR = null;
+      const W = 640, H = 320, M = { l: 50, r: 50, t: 16, b: 34 };
+      const xMin = ratings[0], xMax = ratings[ratings.length - 1];
+
+      const fmt = (kind, v) => {
+        const s = Number.isInteger(v) ? String(v) : v.toFixed(1);
+        if (v === 0) return '0';
+        if (kind === 'yield') return (v > 0 ? '+' : '') + s;
+        if (kind === 'flat') return (v > 0 ? '+' : '') + s;
+        return (v > 0 ? '+' : '') + s + '%';
+      };
+
+      function draw() {
+        const stat = byStat[statSlug];
+        const role = stat.roles.find((r) => r.key === roleKey);
+        const baseS = stat.base[roleKey], cmS = stat.cm[roleKey];
+        titleEl.textContent = `${stat.name} · ${role.label} — ${role.effect}`;
+        // Legend swatch tracks the active stat's in-game color (color.xml)
+        const sw = document.querySelector('.sg-swatch--cm');
+        if (sw) sw.style.borderTopColor = stat.color;
+
+        let lo = 0, hi = 0;
+        for (const v of baseS.concat(cmS)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        const pad = (hi - lo) * 0.08 || 1;
+        lo -= pad; hi += pad;
+        const xS = (r) => M.l + ((r - xMin) / (xMax - xMin)) * (W - M.l - M.r);
+        const yS = (v) => (H - M.b) - ((v - lo) / (hi - lo)) * (H - M.t - M.b);
+        const pts = (arr) => arr.map((v, i) => `${xS(ratings[i]).toFixed(1)},${yS(v).toFixed(1)}`).join(' ');
+
+        let g = '';
+        // y grid (5 ticks) + zero line
+        for (let i = 0; i <= 4; i++) {
+          const v = lo + ((hi - lo) / 4) * i, y = yS(v);
+          g += `<line x1="${M.l}" y1="${y}" x2="${W - M.r}" y2="${y}" class="cg-grid"/>`;
+          g += `<text x="${M.l - 6}" y="${y + 3}" class="cg-ylab">${Math.round(v * 10) / 10}</text>`;
+        }
+        const yz = yS(0);
+        g += `<line x1="${M.l}" y1="${yz}" x2="${W - M.r}" y2="${yz}" class="cg-zero"/>`;
+        // x labels (every 3 ratings)
+        for (let r = xMin; r <= xMax; r += 3) g += `<text x="${xS(r)}" y="${H - M.b + 16}" class="cg-xlab">${r > 0 ? '+' + r : r}</text>`;
+        g += `<text x="${(M.l + W - M.r) / 2}" y="${H - 2}" class="cg-axis">Rating</text>`;
+        // lines
+        g += `<polyline points="${pts(baseS)}" class="cg-base"/>`;
+        g += `<polyline points="${pts(cmS)}" class="cg-cm" style="stroke:${stat.color}"/>`;
+        // hover marker
+        const r = hoverR == null ? (xMax) : hoverR;
+        const idx = ratings.indexOf(r);
+        if (idx >= 0) {
+          const mx = xS(r);
+          g += `<line x1="${mx}" y1="${M.t}" x2="${mx}" y2="${H - M.b}" class="cg-guide"/>`;
+          g += `<circle cx="${mx}" cy="${yS(baseS[idx])}" r="3.5" class="cg-dot-base"/>`;
+          g += `<circle cx="${mx}" cy="${yS(cmS[idx])}" r="4" class="cg-dot-cm" style="fill:${stat.color}"/>`;
+          readoutEl.innerHTML =
+            `Rating <b>${r > 0 ? '+' + r : r}</b> · ${role.label}: ` +
+            `Competitive <b style="color:${stat.color}">${fmt(role.kind, cmS[idx])}</b> · ` +
+            `Non-competitive <b>${fmt(role.kind, baseS[idx])}</b>`;
+        }
+        setSVG(svg, g);
+      }
+
+      svg.addEventListener('pointermove', (e) => {
+        const rect = svg.getBoundingClientRect();
+        const px = (e.clientX - rect.left) / rect.width * W;
+        const r = Math.round(xMin + ((px - M.l) / (W - M.l - M.r)) * (xMax - xMin));
+        hoverR = Math.max(xMin, Math.min(xMax, r));
+        draw();
+      });
+      svg.addEventListener('pointerleave', () => { hoverR = null; draw(); });
+
+      // Council-seat roles vary per stat (Spymaster draws on Wisdom, Courage and
+      // Discipline; Chancellor on all four; Ambassador only Wisdom) — hide role
+      // buttons the active stat doesn't have, and fall back to Leader if needed.
+      function syncRoleButtons() {
+        const keys = new Set(byStat[statSlug].roles.map((r) => r.key));
+        roleBtns.forEach((b) => { b.style.display = keys.has(b.getAttribute('data-role')) ? '' : 'none'; });
+        if (!keys.has(roleKey)) roleKey = 'leader';
+        roleBtns.forEach((x) => x.classList.toggle('is-active', x.getAttribute('data-role') === roleKey));
+      }
+      statBtns.forEach((b) => b.addEventListener('click', () => {
+        statSlug = b.getAttribute('data-stat');
+        statBtns.forEach((x) => x.classList.toggle('is-active', x === b));
+        syncRoleButtons();
+        draw();
+      }));
+      roleBtns.forEach((b) => b.addEventListener('click', () => {
+        roleKey = b.getAttribute('data-role');
+        roleBtns.forEach((x) => x.classList.toggle('is-active', x === b));
+        draw();
+      }));
+      syncRoleButtons();
+      draw();
+    })();
+  </script>
+</Base>
+
+<style>
+  .scale-intro { max-width: 60rem; margin: 0 0 1.25rem; color: var(--text-dim); font-size: 0.9rem; line-height: 1.5; }
+  .scale-intro p { margin: 0 0 0.6rem; }
+  .scale-intro code { font-family: var(--font-mono); font-size: 0.82em; background: var(--bg-elev-2); padding: 0.05rem 0.3rem; border-radius: 4px; color: var(--text); }
+  .scale-roles { margin: 0 0 0.6rem; padding-left: 1.1rem; display: grid; gap: 0.2rem; }
+  .scale-roles b { color: var(--text); }
+  .scale-note { font-size: 0.82rem; color: var(--text-faint); font-style: italic; }
+
+  /* Mode toggle */
+  .mode-toggle { display: inline-flex; gap: 0; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; margin-bottom: 1.25rem; }
+  .mode-toggle__btn {
+    font-family: var(--font-display); font-size: 0.82rem; letter-spacing: 0.03em;
+    padding: 0.4rem 0.95rem; background: var(--bg-elev); color: var(--text-dim);
+    border: none; cursor: pointer; transition: background 0.12s, color 0.12s;
+  }
+  .mode-toggle__btn + .mode-toggle__btn { border-left: 1px solid var(--border-strong); }
+  .mode-toggle__btn:hover { color: var(--text); }
+  .mode-toggle__btn.is-active { background: color-mix(in srgb, var(--accent) 30%, var(--bg-elev) 70%); color: var(--text); }
+
+  /* Mode visibility */
+  .scaling[data-mode='base'] .tb--cm { display: none; }
+  .scaling[data-mode='cm'] .tb--base { display: none; }
+
+  /* Stat section */
+  .scale-stat { margin-bottom: 1.75rem; }
+  .scale-stat__hdr { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .scale-stat__ico { width: 22px; height: 22px; object-fit: contain; }
+  .scale-stat__name { font-family: var(--font-display); font-size: 1.15rem; margin: 0; color: var(--stat-color, var(--accent)); }
+  .scale-stat__yield { font-size: 0.8rem; color: var(--text-faint); }
+  .scale-stat__yield b { color: var(--text-dim); }
+
+  .stbl__rate-col { width: 5rem; }
+
+  .nhdr--col {
+    background: var(--bg-elev-2); color: var(--text);
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+    border-bottom: 2px solid var(--border-strong);
+    text-align: right; padding: 0.4rem 0.55rem; vertical-align: bottom;
+  }
+  .nhdr__name { font-family: var(--font-display); font-size: 0.8rem; letter-spacing: 0.02em; display: block; }
+  .nhdr__effect { font-size: 0.66rem; color: var(--text-faint); font-family: var(--font-mono); display: block; margin-top: 1px; }
+
+  .rowlabel--rate { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.84rem; background: var(--bg-elev); color: var(--text-dim); padding: 0.3rem 0.6rem; }
+  .cell--num { text-align: right; padding: 0.3rem 0.55rem; }
+  .numval { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.82rem; }
+  .cell--num.is-empty { background: var(--bg-elev); }
+  .cell--num.is-empty .numval { color: var(--text-faint); }
+  .cell--num.is-neg .numval { opacity: 0.75; }
+  tr.is-zero { opacity: 0.6; }
+  tr.is-zero .rowlabel--rate { color: var(--text-faint); }
+
+  /* ── Interactive rating graph ── */
+  .sg-panel {
+    border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+    background: var(--bg-elev); padding: 0.9rem 1rem 1rem; margin-bottom: 1.5rem; max-width: 760px;
+  }
+  .sg-controls { display: flex; flex-wrap: wrap; gap: 0.6rem 1.2rem; margin-bottom: 0.7rem; }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; flex-wrap: wrap; }
+  .seg__btn {
+    font-family: var(--font-display); font-size: 0.76rem; padding: 0.32rem 0.7rem;
+    background: var(--bg-elev); color: var(--text-dim); border: none; cursor: pointer; transition: background 0.12s, color 0.12s;
+  }
+  .seg__btn + .seg__btn { border-left: 1px solid var(--border-strong); }
+  .seg__btn:hover { color: var(--text); }
+  .seg__btn.is-active { background: color-mix(in srgb, var(--accent) 28%, var(--bg-elev) 72%); color: var(--text); }
+  .sg-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.3rem; }
+  .sg-title { font-family: var(--font-display); font-size: 0.9rem; color: var(--text); }
+  .sg-legend { display: inline-flex; gap: 0.8rem; font-size: 0.74rem; color: var(--text-dim); }
+  .sg-legend__item { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .sg-swatch { width: 16px; height: 0; border-top-width: 2.5px; border-top-style: solid; display: inline-block; }
+  .sg-swatch--cm { border-top-color: var(--accent); }
+  .sg-swatch--base { border-top-color: var(--text-faint); border-top-style: dashed; }
+  .sg-graph { width: 100%; height: auto; display: block; background: var(--bg); border-radius: 8px; touch-action: none; cursor: crosshair; }
+  .sg-readout { font-size: 0.8rem; color: var(--text-dim); margin: 0.5rem 0 0; min-height: 1.2em; }
+
+  .sg-graph :global(.cg-grid) { stroke: var(--border); stroke-width: 1; opacity: 0.45; }
+  .sg-graph :global(.cg-zero) { stroke: var(--border-strong); stroke-width: 1.2; }
+  .sg-graph :global(.cg-ylab) { fill: var(--text-faint); font-size: 11px; font-family: var(--font-mono); text-anchor: end; }
+  .sg-graph :global(.cg-xlab) { fill: var(--text-faint); font-size: 11px; font-family: var(--font-mono); text-anchor: middle; }
+  .sg-graph :global(.cg-axis) { fill: var(--text-faint); font-size: 11px; font-family: var(--font-mono); text-anchor: middle; }
+  .sg-graph :global(.cg-base) { fill: none; stroke: var(--text-faint); stroke-width: 2; stroke-dasharray: 5 4; opacity: 0.85; }
+  .sg-graph :global(.cg-cm) { fill: none; stroke-width: 2.6; }
+  .sg-graph :global(.cg-guide) { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.55; }
+  .sg-graph :global(.cg-dot-base) { fill: var(--text-faint); stroke: var(--bg); stroke-width: 1.5; }
+  .sg-graph :global(.cg-dot-cm) { stroke: var(--bg); stroke-width: 2; }
+
+  /* ── Agent yields section ── */
+  .agent-sec { margin-top: 2.25rem; }
+  .agent-sec__title { font-family: var(--font-display); font-size: 1.3rem; margin: 0 0 0.6rem; color: var(--accent); }
+  .ac-panel {
+    border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+    background: var(--bg-elev); padding: 0.9rem 1rem 0.8rem; max-width: 760px;
+  }
+  .ac-controls { display: flex; flex-wrap: wrap; gap: 0.7rem 1.1rem; margin-bottom: 0.8rem; }
+  .ac-field { display: flex; flex-direction: column; gap: 0.25rem; }
+  .ac-field__lab { font-size: 0.7rem; color: var(--text-faint); font-family: var(--font-mono); letter-spacing: 0.02em; }
+  .ac-field select, .ac-field input[type='number'] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: 6px; padding: 0.32rem 0.5rem; font-size: 0.85rem; font-family: var(--font-body, inherit);
+  }
+  .ac-field input[type='number'] { width: 6.5rem; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .ac-field--check { justify-content: flex-end; }
+  .ac-field--check input { width: 1.15rem; height: 1.15rem; margin: 0.3rem 0; accent-color: var(--accent); }
+  .ac-result { font-size: 1.05rem; margin: 0 0 0.3rem; color: var(--text); }
+  .ac-result__pct { font-size: 0.8rem; color: var(--text-dim); }
+  .ac-breakdown { font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-dim); margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+</style>

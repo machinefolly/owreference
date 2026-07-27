@@ -1,0 +1,858 @@
+/* Old World Reference — Tufte / editorial direction.
+   Ported from from-design/new-may-12/ on 2026-05-12.
+   Warm slate palette (oklch hue 80), Cormorant Garamond + Inter,
+   data-ink discipline: yield → 3px left bar, nation → 2px underline. */
+
+:root {
+  color-scheme: dark;
+
+  /* Warm slate palette (oklch, hue 80 = bone/amber) — borrowed from owtt. */
+  --bg:           oklch(0.18 0.012 80);
+  --bg-elev:      oklch(0.22 0.012 78);
+  --bg-elev-2:    oklch(0.25 0.013 78);
+  --bg-elev-3:    oklch(0.28 0.014 78);
+  --border:       oklch(0.32 0.012 80);
+  --border-strong:oklch(0.40 0.014 80);
+  --border-faint: oklch(0.28 0.010 80);
+
+  --text:         oklch(0.94 0.008 80);
+  --text-soft:    oklch(0.82 0.010 80);
+  --text-dim:     oklch(0.62 0.012 80);
+  --text-faint:   oklch(0.48 0.012 80);
+
+  --gold:         oklch(0.82 0.13 82);
+  --gold-soft:    oklch(0.70 0.10 82);
+  --gold-deep:    oklch(0.55 0.08 80);
+  --gold-glow:    oklch(0.82 0.13 82 / 0.18);
+
+  /* Legacy aliases */
+  --accent:       var(--gold);
+  --accent-2:     oklch(0.74 0.08 252);
+
+  --font-ui:      "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+
+  --shadow-sm: 0 1px 0 rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.25);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; min-height: 100vh; }
+/* Reserve the vertical scrollbar gutter on every page so short tabs (no
+   scrollbar) and tall tabs (scrollbar) don't shift the centered layout
+   horizontally when navigating between them. */
+html { scrollbar-gutter: stable; }
+body {
+  background:
+    radial-gradient(1200px 600px at 20% -10%, oklch(0.26 0.02 70 / .55), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, oklch(0.24 0.02 250 / .25), transparent 60%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  position: relative;
+}
+/* Subtle parchment grid overlay — almost imperceptible, just enough texture.
+   Use rgba (not oklch at very low alpha) — Chromium occasionally rendered
+   the oklch form with a visible red/magenta cast on wide-gamut displays
+   while Firefox stayed correctly neutral. */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: 60px 60px;
+  z-index: 0;
+}
+main, header { position: relative; z-index: 1; }
+
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code { font-family: var(--font-mono); font-size: 0.92em; }
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0;
+  color: var(--text);
+}
+
+/* ─── Yield tokens (used as 3px left-bar color on cells) ─── */
+.yield-science     { --yield-bg:#6b5ea6; }
+.yield-civics      { --yield-bg:#c98b46; }
+.yield-training    { --yield-bg:#c25555; }
+.yield-money       { --yield-bg:#d9b13a; }
+.yield-food        { --yield-bg:#5e8c43; }
+.yield-iron        { --yield-bg:#8a8a8e; }
+.yield-stone       { --yield-bg:#b3b3b8; }
+.yield-wood        { --yield-bg:#8a4a08; }
+.yield-culture     { --yield-bg:#4e84b8; }
+.yield-growth      { --yield-bg:#6ba368; }
+.yield-orders      { --yield-bg:#b8b8c0; }
+.yield-discontent  { --yield-bg:#7a6ea3; }
+.yield-happiness   { --yield-bg:#d9b13a; }
+.yield-influence   { --yield-bg:#c8c9d3; }
+.yield-intrigue    { --yield-bg:#735483; }
+.yield-legitimacy  { --yield-bg:#c9a04a; }
+.yield-maintenance { --yield-bg:#a35858; }
+.yield-divine_favor{ --yield-bg:#e3c45f; }
+.yield-wrath       { --yield-bg:#a83838; }
+.yield-misc        { --yield-bg: var(--border-strong); }
+
+/* Light token backgrounds need dark text on filled .effect tiles — the
+   25% black scrim alone leaves near-white text at ~2.5:1 there. Pages
+   reference var(--yield-fg, var(--text)); dark tokens fall through to
+   the default near-white. */
+.yield-money, .yield-happiness, .yield-stone, .yield-orders,
+.yield-influence, .yield-divine_favor {
+  --yield-fg: #16171c;
+}
+
+/* Legend chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.1rem 0.55rem 0.1rem 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  color: var(--text-soft);
+  background: transparent;
+  border: 0;
+  text-decoration: none;
+}
+.chip:hover { color: var(--text); text-decoration: none; }
+.chip__glyph { font-size: 0.95em; color: var(--yield-bg); }
+.chip__icon { width: 1em; height: 1em; object-fit: contain; }
+
+/* ──────────────────────────────────────────────────────────
+   Header — editorial: shield tile + eyebrow + serif title
+   ────────────────────────────────────────────────────────── */
+.hdr {
+  position: sticky; top: 0; z-index: 20;
+  background: linear-gradient(to bottom, oklch(0.16 0.012 80 / .92), oklch(0.16 0.012 80 / .82));
+  backdrop-filter: blur(10px) saturate(140%);
+  border-bottom: 1px solid var(--border);
+}
+.hdr__inner {
+  max-width: 1700px; margin: 0 auto;
+  padding: 0.8rem 1.4rem;
+  display: grid; grid-template-columns: auto 1fr auto;
+  align-items: center; gap: 1.5rem;
+}
+.hdr__brand {
+  display: inline-flex; align-items: center; gap: 0.7rem;
+  color: var(--text); text-decoration: none;
+}
+.hdr__brand:hover { text-decoration: none; }
+.hdr__mark {
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  background: radial-gradient(circle at 30% 30%, oklch(0.32 0.05 80), oklch(0.20 0.02 80));
+  border: 1px solid var(--gold-deep);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / .08), var(--shadow-sm);
+  flex-shrink: 0;
+}
+.hdr__mark img { width: 22px; height: 22px; object-fit: contain; }
+.hdr__title-wrap {
+  display: flex; flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+}
+.hdr__sub {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+  font-weight: 500;
+}
+.hdr__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.35rem;
+  letter-spacing: 0.005em;
+  color: var(--text);
+}
+.hdr__nav { display: flex; gap: 0.15rem; flex-wrap: wrap; }
+.hdr__navlink {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  position: relative;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+}
+.hdr__navlink:hover { color: var(--text); background: var(--bg-elev); text-decoration: none; }
+.hdr__navlink.is-active {
+  color: var(--text);
+  background: var(--bg-elev);
+  box-shadow: inset 0 -2px 0 var(--gold);
+}
+
+/* Section dropdown menus (one <details> per tabs.ts section) */
+.hdr__menu { position: relative; }
+.hdr__menu > summary { list-style: none; cursor: pointer; user-select: none; display: inline-block; }
+.hdr__menu > summary::-webkit-details-marker { display: none; }
+.hdr__caret { margin-left: 0.3em; font-size: 0.7em; opacity: 0.6; }
+.hdr__menu[open] > summary { color: var(--text); background: var(--bg-elev); }
+.hdr__panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  min-width: 15rem;
+  padding: 0.35rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+.hdr__panellink {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.hdr__panellink:hover { color: var(--text); background: var(--bg-elev-2); text-decoration: none; }
+.hdr__panellink.is-active { color: var(--text); box-shadow: inset 2px 0 0 var(--gold); background: var(--bg-elev-2); }
+.hdr__panelicon { width: 1.2em; text-align: center; flex-shrink: 0; }
+
+/* Mobile menu: hidden on desktop, replaces the section dropdowns on phones */
+.hdr__mobilemenu { display: none; position: relative; }
+.hdr__mobilemenu > summary { list-style: none; cursor: pointer; display: inline-block; }
+.hdr__mobilemenu > summary::-webkit-details-marker { display: none; }
+.hdr__mobilemenu[open] > summary { color: var(--text); background: var(--bg-elev); }
+.hdr__mobilepanel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: auto;
+  z-index: 60;
+  width: min(92vw, 26rem);
+  max-height: 75vh;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.hdr__mgroup { margin: 0 0 0.4rem; }
+.hdr__mgroup-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  color: var(--gold-soft);
+  padding: 0.4rem 0.55rem 0.15rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.2rem;
+}
+.hdr__mobilepanel .hdr__panellink { padding: 0.45rem 0.55rem; font-size: 0.85rem; }
+
+.hdr__search {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.55rem;
+  min-width: 280px;
+}
+.hdr__search:focus-within { border-color: var(--gold-deep); box-shadow: 0 0 0 2px var(--gold-glow); }
+.hdr__search-ico { color: var(--text-faint); font-size: 1rem; }
+.hdr__search input {
+  flex: 1; background: transparent; border: 0; outline: 0;
+  color: var(--text); font: inherit;
+  min-width: 0;
+}
+.hdr__search input::placeholder { color: var(--text-faint); }
+.hdr__search input::-webkit-search-cancel-button { display: none; }
+.hdr__search kbd {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+/* ──────────────────────────────────────────────────────────
+   Page chrome
+   ────────────────────────────────────────────────────────── */
+.main {
+  /* Generous cap so wide tables use the screen (was 1700px, which left ~300px
+     unused on a 2000px monitor and forced wide matrices to scroll internally).
+     Stays sane/centred on ultrawide. */
+  max-width: 2200px;
+  margin: 0 auto;
+  padding: 1.25rem 1.4rem 4rem;
+}
+.page-meta {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+.page-eyebrow {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--gold-soft);
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+.page-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0;
+  color: var(--text);
+  display: inline-flex; align-items: baseline; gap: 0.5rem;
+}
+.page-title__mark { display: none; }
+.page-stats { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; }
+.stat {
+  font-size: 0.72rem; color: var(--text-soft);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.stat b { color: var(--text); font-weight: 700; font-family: var(--font-mono); margin-right: 0.2rem; }
+
+/* ──────────────────────────────────────────────────────────
+   Nations grid scroll wrapper — minimal frame in Tufte direction
+   ────────────────────────────────────────────────────────── */
+.grid { position: relative; }
+/* Solid base so the body's faint grid texture (body::before) doesn't bleed
+   through the transparent table cells and clash with the table's own gridlines.
+   On .grid__scroll (not .grid) so it never touches card layouts that reuse the
+   bare .grid class, e.g. events/index. */
+.grid__scroll {
+  background: var(--bg);
+  /* Horizontal scroll for the wide table. NOTE: overflow-x:auto makes this
+     a scroll container, so sticky descendants resolve against THIS box, not
+     the viewport (overflow-y:clip does not change that). The in-table sticky
+     header therefore uses top:0 — any positive top would statically shove it
+     down (this box never scrolls vertically), covering the first rows. */
+  overflow-x: auto;
+  overflow-y: clip;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.grid__searchnote {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding: 0.5rem 0.2rem 0;
+}
+.is-hidden { display: none !important; }
+.ntbl col.is-hidden { visibility: collapse; display: revert !important; }
+/* Column hide is driven entirely by <col>.is-hidden (visibility: collapse)
+   with table-layout: fixed. The cells must STAY in the row — display:none-ing
+   them changes per-row cell counts, so the remaining cells reflow under the
+   wrong nation headers and the fixed `colspan` section rows desync (the
+   "check 4, only 1 shows / random" bug). visibility: collapse keeps the cell
+   in place; the collapsed <col> gives it zero width. */
+.ntbl th.is-hidden,
+.ntbl td.is-hidden { display: revert !important; visibility: collapse; }
+
+/* Nation filter (unit-damage, unit-counters): separate class from .is-hidden
+   so it composes with the header search without the two scripts clobbering
+   each other's state. The .dmx matrix hides matching cells per-index in every
+   row, so display:none is safe there (cell counts stay aligned). */
+.nat-hidden { display: none !important; }
+.natbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.natbar__label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.natbar__sel {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.4rem;
+}
+.natbar__vs {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-faint);
+}
+.natbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.natbar__toggle input { accent-color: var(--gold); margin: 0; }
+.natbar__hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  flex-basis: 100%;
+}
+@media (min-width: 900px) {
+  .natbar__hint { flex-basis: auto; margin-left: 0.4rem; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   Nations table — Tufte direction
+   ────────────────────────────────────────────────────────── */
+.ntbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+.ntbl col.ntbl__rowlabel-col { width: 7.5rem; }
+.ntbl col[data-nation] { width: 12.5rem; }
+/* Family / archetype matrices (exactly 10 columns) do NOT pin a per-column
+   width — that would freeze the table at 10×12rem ≈ 2040px and force an internal
+   scrollbar even on screens wide enough to show all 10. Instead the page sets a
+   table min-width (the mobile-crush floor); above it the columns flex to fill
+   the viewport, below it .grid__scroll scrolls. See archetypes/families.astro. */
+.ntbl col[data-religion] { width: 12rem; }
+.ntbl col[data-tribe] { width: 12rem; }
+/* Counter matrix: narrower than the text matrices (cells are a % value + a short
+   source list), but still needs a width so the source names don't overflow the
+   crushed ~45px columns on mobile. */
+.ntbl col[data-target] { width: 10rem; }
+.ntbl thead th { font-weight: 500; }
+.ntbl th, .ntbl td { vertical-align: top; }
+
+/* Sticky row-label column — pinned-left during horizontal scroll. Bg is
+   solid so cell content scrolling under it stays readable. */
+.rowlabel {
+  background: var(--bg);
+  color: var(--text-soft);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.01em;
+  text-align: right;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  border-right: 1px solid var(--border);
+  padding: 0.16rem 0.6rem 0.16rem 0;
+  line-height: 1.2;
+}
+.rowlabel--corner {
+  background: var(--bg);
+  z-index: 5;
+  position: sticky; top: 0; left: 0;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 0.5rem 0.7rem 0.4rem 0;
+  text-align: right;
+}
+.rowlabel--corner .rowlabel__small,
+.rowlabel--corner .rowlabel__big {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  display: block;
+  font-weight: 500;
+}
+.rowlabel--corner .rowlabel__big {
+  color: var(--gold-soft);
+  margin-top: 3px;
+}
+
+/* Section header rows — gold eyebrow + gold-deep underline. Solid bg so
+   cells scrolling horizontally underneath stay legible. */
+.srow__th {
+  background: var(--bg);
+  color: var(--gold-soft);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 0.55rem 0 0.2rem 0;
+  border-bottom: 1px solid var(--gold-deep);
+  position: sticky; left: 0;
+}
+.srow__chevron { display: none; }
+
+/* Nation column header — sticks to top of the .grid__scroll viewport.
+   Solid bg so cells scrolling under it stay readable. */
+.nhdr {
+  background: var(--bg);
+  color: var(--text);
+  position: sticky; top: 0;
+  z-index: 2;
+  padding: 0.5rem 0.6rem 0.4rem;
+  text-align: left;
+  vertical-align: bottom;
+}
+.nhdr__inner {
+  display: flex; flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  position: relative;
+  padding-bottom: 0.5rem;
+}
+.nhdr__inner::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0.5rem; bottom: 0;
+  height: 2px;
+  background: var(--nation-bg);
+  opacity: 0.9;
+}
+.nhdr__link {
+  display: flex; flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  color: inherit; text-decoration: none;
+}
+.nhdr__link:hover { text-decoration: none; }
+.nhdr__link:hover .nhdr__name { color: var(--gold); }
+.nhdr__crest {
+  width: 26px; height: 26px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
+  opacity: 0.95;
+}
+.nhdr__name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  line-height: 1.05;
+}
+
+/* Data cells — transparent bg, very tight padding for spreadsheet-style
+   density. Inline icons carry the categorical encoding. */
+.cell {
+  position: relative;
+  background: transparent;
+  color: var(--text);
+  padding: 0.22rem 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.22;
+  border-bottom: 1px solid var(--border-faint);
+}
+.cell.is-empty { color: var(--text-faint); }
+
+/* Hover-highlight: cells with the same family / shrine / tech key get
+   a gold-tinted background while another sibling is hovered. */
+.cell.hl { cursor: default; transition: background 0.12s; }
+.cell.hl:hover { background: oklch(0.30 0.04 80 / 0.45); }
+.cell.is-related { background: var(--gold-glow); }
+.cell__dash { opacity: 0.3; font-family: var(--font-mono); }
+
+/* Links inside cells — quiet, underline on hover only */
+.cell a, .cell .term {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 0;
+}
+.cell a:hover, .cell .term:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  border-bottom: 0;
+}
+.cell .term__icon {
+  width: 0.95em; height: 0.95em;
+  vertical-align: -0.1em;
+  margin: 0 0.05em;
+  object-fit: contain;
+}
+
+/* Shrine cell internals — compact two-line layout to match spreadsheet
+   density. Line 1: icon + serif type + italic deity. Line 2: effect. */
+.shrine {
+  display: flex; flex-direction: column;
+  gap: 0;
+}
+/* The shrine head links to its type section on the Shrines page. */
+a.shrine__head { color: inherit; text-decoration: none; }
+a.shrine__head:hover .shrine__type { text-decoration: underline; text-underline-offset: 2px; }
+.shrine__head {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  line-height: 1.1;
+}
+.shrine__effect { line-height: 1.18; }
+.shrine__art {
+  width: 14px; height: 14px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,0.5));
+  opacity: 0.92;
+  flex-shrink: 0;
+  align-self: center;
+}
+.shrine__type {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.005em;
+  color: var(--text);
+}
+.shrine__deity {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+}
+.shrine__effect {
+  color: var(--text-soft);
+}
+
+/* Family cells: per-family in-game color shows as a 3px left-edge stripe.
+   Each family has a canonical hex from COLOR_NATION_X_FAMILY_0Y in
+   color.xml; we leave the cell otherwise transparent. */
+.cell--fam {
+  box-shadow: inset 3px 0 0 var(--fam-stripe, transparent);
+  padding-left: 0.95rem;
+}
+
+/* Family cell internals — compact one-line layout: icon + class · name */
+.fam { display: inline-flex; align-items: baseline; gap: 0.35rem; flex-wrap: wrap; }
+.fam__icon {
+  width: 1em; height: 1em;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.45));
+  flex-shrink: 0;
+  opacity: 0.85;
+  align-self: center;
+}
+.fam__class {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.005em;
+  color: var(--text);
+}
+.fam__class--link { text-decoration: none; }
+.fam__class--link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.fam__name {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  color: var(--text-faint);
+}
+
+/* ──────────────────────────────────────────────────────────
+   Caption + legends
+   ────────────────────────────────────────────────────────── */
+.legends {
+  margin-top: 1rem;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.legend {
+  display: flex; flex-wrap: wrap; gap: 0.35rem 0.6rem;
+  align-items: center;
+  font-size: 0.72rem; color: var(--text-soft);
+}
+.legend__label {
+  font-family: var(--font-ui);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--gold-soft);
+  margin-right: 0.4rem;
+  font-weight: 500;
+}
+.legend__label em { color: var(--gold); font-style: normal; }
+.caption {
+  font-family: var(--font-ui);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--gold-soft);
+  font-weight: 500;
+  margin-top: 0.4rem;
+}
+
+/* ──────────────────────────────────────────────────────────
+   Nation picker popover (attached to the visibility stat)
+   ────────────────────────────────────────────────────────── */
+.picker { position: relative; }
+.stat--button {
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font: inherit;
+}
+.stat--button:hover { color: var(--text); border-color: var(--gold-deep); }
+.stat--button[aria-expanded="true"] { border-color: var(--gold-deep); background: var(--bg-elev-2); }
+.stat__chev { color: var(--text-faint); font-size: 0.7em; transition: transform 0.15s; }
+.stat--button[aria-expanded="true"] .stat__chev { transform: rotate(180deg); }
+
+.nation-picker {
+  margin-bottom: 0.75rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  max-width: 540px;
+  margin-left: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+}
+.nation-picker[hidden] { display: none; }
+.nation-picker__actions {
+  display: flex; gap: 0.4rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.nation-picker__action {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  padding: 0.25rem 0.65rem;
+  background: transparent;
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.nation-picker__action:hover { color: var(--text); border-color: var(--border-strong); }
+.nation-picker__action--close { margin-left: auto; color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, var(--border)); }
+.nation-picker__list {
+  list-style: none;
+  margin: 0; padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.15rem 0.4rem;
+}
+.nation-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.3rem 0.2rem 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  user-select: none;
+  position: relative;
+  /* In-game nation color shows as a 3px left-edge swatch + a faded gradient
+     wash (mirrors the nation cells on the tables). Falls back to transparent
+     for non-nation facet rows (Class/Tier), which carry no --nation-* vars. */
+  box-shadow: inset 3px 0 0 var(--nation-bg, var(--border));
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--nation-ingame, transparent) 28%, transparent), transparent 72%);
+  padding-left: 0.6rem;
+}
+.nation-picker__row:hover { background-color: var(--bg-elev-2); }
+.nation-picker__row:has(input:not(:checked)) { background-image: none; }
+.nation-picker__cb { margin: 0; accent-color: var(--gold); }
+.nation-picker__crest { width: 18px; height: 18px; object-fit: contain; opacity: 0.95; }
+.nation-picker__name {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+.nation-picker__row:has(input:not(:checked)) .nation-picker__name { color: var(--text-faint); text-decoration: line-through; }
+.nation-picker__row:has(input:not(:checked)) .nation-picker__crest { opacity: 0.45; }
+.nation-picker__row:has(input:not(:checked)) {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--nation-bg) 35%, transparent 65%);
+}
+
+/* ──────────────────────────────────────────────────────────
+   Footer
+   ────────────────────────────────────────────────────────── */
+.foot {
+  margin-top: 2rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 0.6rem 1.2rem;
+  font-size: 0.72rem;
+  color: var(--text-soft);
+}
+.foot__col { display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.foot__label {
+  font-family: var(--font-ui);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--gold-soft);
+  margin-right: 0.2rem;
+  font-weight: 500;
+}
+.foot__val { color: var(--text); font-variant-numeric: tabular-nums; }
+.foot__val--dim { color: var(--text-dim); }
+.foot__dot { color: var(--text-faint); opacity: 0.6; }
+.foot a { color: var(--text-soft); text-decoration: none; }
+.foot a:hover { color: var(--gold); text-decoration: underline; }
+
+/* ──────────────────────────────────────────────────────────
+   Mobile fallback
+   ────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .hdr__inner { grid-template-columns: 1fr; gap: 0.6rem; }
+  /* Sections wrap (short labels) — overflow-x:auto would clip the
+     absolutely-positioned dropdown panels. */
+  .hdr__nav { flex-wrap: wrap; }
+  .hdr__search { min-width: 0; }
+}
+
+/* Phones: one Menu disclosure instead of eleven dropdowns. */
+@media (max-width: 700px) {
+  .hdr__nav { display: none; }
+  .hdr__mobilemenu { display: block; }
+  .hdr__inner { grid-template-columns: auto 1fr; align-items: center; }
+  .hdr__spacer { display: none; }
+  .hdr__search { width: 100%; grid-column: 1 / -1; }
+  .hdr__search kbd { display: none; }
+  .page-title { font-size: 1.35rem; }
+  .main { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .page-meta { flex-direction: column; align-items: flex-start; }
+}

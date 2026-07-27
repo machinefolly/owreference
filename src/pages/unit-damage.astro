@@ -1,0 +1,319 @@
+---
+import Base from '../layouts/Base.astro';
+import units from '../data/units.json';
+import { attackDamage, damageTone } from '../lib/combat';
+
+const base = import.meta.env.BASE_URL;
+
+type Unit = typeof units[number];
+
+// ── Full damage matrix (the spreadsheet's heatmap): row attacks column ──
+// Same baseline as the legacy sheet: full HP, open terrain, no promotions /
+// terrain / flanking; both sides' anti-trait modifiers applied.
+// isMilitary excludes Scouts, Explorers, and religion Disciples — they can
+// technically fight but aren't army units (their primaryLabel is Infantry,
+// so trait filters won't catch them).
+const matrixUnits = (units as Unit[])
+  .filter(u => u.isCombat && u.isMilitary && !u.isWater)
+  .sort((a, b) => b.strength - a.strength || a.name.localeCompare(b.name));
+
+const damageRows = matrixUnits.map(att => ({
+  att,
+  cells: matrixUnits.map(def => {
+    const d = attackDamage(att, def);
+    return { def, d, tone: damageTone(d) };
+  }),
+}));
+
+// Nation filter options (e.g. you + your opponent). Generic units always show.
+const nationOptions = [...new Set((units as Unit[]).map(u => u.nationLabel).filter(Boolean))].sort();
+---
+
+<Base
+  title="Unit Damage & Counters"
+  active="unit-damage"
+  pageMark="⚔️"
+  pageStats={[
+    { label: 'land combat units', value: matrixUnits.length },
+    { label: 'matchups', value: matrixUnits.length * matrixUnits.length },
+  ]}
+>
+  <p class="lede">
+    <b>Row units attack column units and deal the damage in the cell</b> — the
+    game's own formula (<code>6 × ATK / DEF</code>, rounded in the stronger
+    unit's favor) with both sides' anti-trait modifiers. Baseline conditions:
+    full HP, open terrain, no promotions, terrain, flanking, or general
+    bonuses. <a href={`${base}combat-damage`}>How the formula works →</a>
+    Click a column header to rank attackers against that defender, a row
+    header to rank that unit's targets; click again to flip, a third time to
+    reset. Full unit stats live on the <a href={`${base}units`}>Units</a> page.
+  </p>
+
+  <div class="natbar">
+    <span class="natbar__label">Nations</span>
+    <select id="nation-a" class="natbar__sel" aria-label="Your nation">
+      <option value="">All nations</option>
+      {nationOptions.map(n => <option value={n}>{n}</option>)}
+    </select>
+    <span class="natbar__vs">vs</span>
+    <select id="nation-b" class="natbar__sel" aria-label="Opponent nation">
+      <option value="">All nations</option>
+      {nationOptions.map(n => <option value={n}>{n}</option>)}
+    </select>
+    <span class="natbar__hint">Pick your nation and your opponent's to hide everyone else's unique units. Generic units always show.</span>
+  </div>
+
+  <div class="dmx-wrap">
+    <table class="dmx">
+      <thead>
+        <tr>
+          <th class="dmx__corner">
+            <span class="dmx__corner-small">Defender →</span>
+            <span class="dmx__corner-big">Attacker ↓</span>
+          </th>
+          {matrixUnits.map((def, i) => (
+            <th class="dmx__col" scope="col" data-nation={def.nationLabel || ''} style={`z-index:${matrixUnits.length - i + 2}`} title={`${def.name} — STR ${def.strength / 10} — click to sort attackers`}>
+              <span class="dmx__colname">{def.name}</span>
+              <img class="dmx__icon" src={`${base}img/icons/units/${def.iconSlug}.png`} alt={def.name} loading="lazy" />
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {damageRows.map(({ att, cells }) => (
+          <tr data-nation={att.nationLabel || ''}>
+            <th class="dmx__row" scope="row" title={`${att.name} — click to sort targets`}>
+              <div class="dmx__rowlink">
+                <img class="dmx__icon" src={`${base}img/icons/units/${att.iconSlug}.png`} alt="" loading="lazy" />
+                <span class="dmx__rowname">{att.name}</span>
+                <span class="dmx__rowstr">{att.strength / 10}</span>
+              </div>
+            </th>
+            {cells.map(({ def, d, tone }) => (
+              <td
+                class="dmx__cell"
+                style={`background:${tone}`}
+                title={`${att.name} → ${def.name}: ${d} damage`}
+              >{d}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <script is:inline>
+    // Click-to-sort: column header ranks rows by that column's damage,
+    // row header ranks columns by that row's damage. desc → asc → reset.
+    (function () {
+      const table = document.querySelector('.dmx');
+      if (!table) return;
+      const headRow = table.querySelector('thead tr');
+      const tbody = table.querySelector('tbody');
+      headRow.querySelectorAll('.dmx__col').forEach((th, i) => { th.dataset.oi = i; });
+      tbody.querySelectorAll('tr').forEach((tr, i) => { tr.dataset.oi = i; });
+      const cols = () => [...headRow.querySelectorAll('.dmx__col')];
+      const rows = () => [...tbody.querySelectorAll('tr')];
+      let state = null; // {kind, oi, step}
+
+      function stepFor(kind, oi) {
+        if (state && state.kind === kind && state.oi === oi) {
+          state.step += 1;
+          if (state.step > 2) state = null;
+        } else {
+          state = { kind, oi, step: 1 };
+        }
+        return state ? state.step : 0;
+      }
+      function clearMarks() {
+        table.querySelectorAll('.is-sorted').forEach(el => el.classList.remove('is-sorted'));
+      }
+      function applyZ() {
+        const cs = cols();
+        cs.forEach((th, i) => { th.style.zIndex = cs.length - i + 2; });
+      }
+      function sortRows(th) {
+        const s = stepFor('col', th.dataset.oi);
+        clearMarks();
+        let order;
+        if (s === 0) {
+          order = rows().sort((a, b) => a.dataset.oi - b.dataset.oi);
+        } else {
+          const idx = cols().indexOf(th);
+          const val = tr => +tr.children[idx + 1].textContent || 0;
+          const dir = s === 1 ? -1 : 1;
+          order = rows().sort((a, b) => dir * (val(a) - val(b)) || a.dataset.oi - b.dataset.oi);
+          th.classList.add('is-sorted');
+        }
+        order.forEach(tr => tbody.appendChild(tr));
+      }
+      function sortCols(tr) {
+        const s = stepFor('row', tr.dataset.oi);
+        clearMarks();
+        const cs = cols();
+        const tds = [...tr.querySelectorAll('td')];
+        let perm;
+        if (s === 0) {
+          perm = cs.map((_, i) => i).sort((a, b) => cs[a].dataset.oi - cs[b].dataset.oi);
+        } else {
+          const dir = s === 1 ? -1 : 1;
+          perm = cs.map((_, i) => i).sort((a, b) =>
+            dir * ((+tds[a].textContent || 0) - (+tds[b].textContent || 0)) || cs[a].dataset.oi - cs[b].dataset.oi);
+          tr.querySelector('.dmx__row').classList.add('is-sorted');
+        }
+        perm.map(i => cs[i]).forEach(th => headRow.appendChild(th));
+        for (const r of rows()) {
+          const cells = [...r.querySelectorAll('td')];
+          perm.map(i => cells[i]).forEach(td => r.appendChild(td));
+        }
+        applyZ();
+      }
+      headRow.addEventListener('click', e => {
+        const th = e.target.closest('.dmx__col');
+        if (th) sortRows(th);
+      });
+      tbody.addEventListener('click', e => {
+        const th = e.target.closest('.dmx__row');
+        if (th) sortCols(th.parentElement);
+      });
+    })();
+  </script>
+
+  <script is:inline>
+    (function () {
+      const selA = document.getElementById('nation-a');
+      const selB = document.getElementById('nation-b');
+      if (!selA || !selB) return;
+      const KEY = 'ow-nation-filter';
+      try {
+        const saved = JSON.parse(localStorage.getItem(KEY) || '[]');
+        if (saved[0]) selA.value = saved[0];
+        if (saved[1]) selB.value = saved[1];
+      } catch {}
+      function apply() {
+        const chosen = [selA.value, selB.value].filter(Boolean);
+        const ok = (n) => !n || chosen.length === 0 || chosen.includes(n);
+        // Damage matrix: rows by attacker nation, columns by defender nation.
+        const colHeads = [...document.querySelectorAll('.dmx thead .dmx__col')];
+        const hideCol = colHeads.map(th => !ok(th.dataset.nation || ''));
+        colHeads.forEach((th, i) => th.classList.toggle('nat-hidden', hideCol[i]));
+        for (const tr of document.querySelectorAll('.dmx tbody tr')) {
+          tr.classList.toggle('nat-hidden', !ok(tr.dataset.nation || ''));
+          [...tr.querySelectorAll('td')].forEach((td, i) => td.classList.toggle('nat-hidden', hideCol[i]));
+        }
+      }
+      function onChange() {
+        try { localStorage.setItem(KEY, JSON.stringify([selA.value, selB.value])); } catch {}
+        apply();
+      }
+      selA.addEventListener('change', onChange);
+      selB.addEventListener('change', onChange);
+      apply();
+    })();
+  </script>
+</Base>
+
+<style>
+  .lede {
+    color: var(--text-dim);
+    max-width: 70ch;
+    margin: 0 0 1rem;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+  .lede code {
+    background: var(--bg-elev);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  .lede a { color: var(--accent); }
+
+  /* ── Damage heatmap matrix ── */
+  .dmx-wrap {
+    overflow: auto;
+    max-height: 85vh;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    margin: 0 0 1.6rem;
+  }
+  .dmx { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+  .dmx__corner {
+    /* above every angled header (they get descending per-column z-index) */
+    position: sticky; top: 0; left: 0; z-index: 999;
+    background: var(--bg-elev);
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border-strong);
+    border-right: 1px solid var(--border-strong);
+    text-align: right;
+    min-width: 11rem;
+    vertical-align: bottom;
+  }
+  .dmx__corner-small, .dmx__corner-big {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+  .dmx__col {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border-strong);
+    /* top padding = room for the 45° labels */
+    padding: 4.9rem 0.15rem 0.25rem;
+    vertical-align: bottom;
+    text-align: center;
+    cursor: pointer;
+  }
+  /* Angled column labels, anchored at the column's center and rising to the
+     right — easier to read than fully vertical text. */
+  .dmx__colname {
+    position: absolute;
+    bottom: 1.75rem;
+    left: 50%;
+    transform: rotate(-45deg);
+    transform-origin: 0 100%;
+    font-size: 0.62rem;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .dmx__col:hover .dmx__colname { color: var(--text); }
+  .dmx__col.is-sorted .dmx__colname { color: var(--gold); }
+  .dmx__row {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border-strong);
+    padding: 0;
+    text-align: left;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .dmx__rowlink {
+    display: flex; align-items: center; gap: 0.35rem;
+    padding: 0.16rem 0.5rem;
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+  .dmx__row:hover .dmx__rowlink { color: var(--text); }
+  .dmx__row.is-sorted .dmx__rowlink { color: var(--gold); }
+  .dmx__rowname { flex: 1; }
+  .dmx__rowstr {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--text-faint);
+  }
+  .dmx__icon { width: 1.15rem; height: 1.15rem; object-fit: contain; }
+  .dmx__cell {
+    min-width: 1.7rem;
+    text-align: center;
+    padding: 0.14rem 0.2rem;
+    font-size: 0.7rem;
+    color: var(--text);
+    cursor: default;
+  }
+  .dmx__cell:hover { outline: 1px solid var(--gold); outline-offset: -1px; }
+</style>

@@ -1,0 +1,58 @@
+---
+// Auto-links every known entity alias inside a free-text string.
+import { linkify } from '../lib/entities';
+import Term from './Term.astro';
+
+interface Props {
+  text: string;
+  showIcons?: boolean;
+  // If true, replace yield/concept aliases ("Sci", "Cult", "Civ", "Orders"…)
+  // with just their icon (label tooltip preserved). Mirrors the game's UI
+  // which shows the yield glyph rather than spelling out the yield name.
+  // Other entity types (nations, units, techs…) still render as text+icon
+  // since their names are not directly representable by a single glyph.
+  iconsForYields?: boolean;
+}
+
+const { text, showIcons = true, iconsForYields = false } = Astro.props;
+const segments = linkify(text || '');
+
+function shouldIconize(seg: typeof segments[number]): boolean {
+  if (!iconsForYields) return false;
+  if (!seg.entity) return false;
+  if (!seg.entity.icon) return false;
+  return ['yield', 'concept', 'improvement', 'resource', 'project', 'promotion'].includes(seg.entity.type);
+}
+
+// Match in-game style: the game writes "2🌾" not "+2 Food". Only strip
+// the leading "+" when it precedes an *integer value followed by a space*
+// that gets iconized — i.e. a raw count like "+2 Training" → "2 [training]".
+// Leave "+" before a percentage ("+20% Mines") alone since the % carries
+// modifier meaning. Leave commas alone too — they keep multi-value lists
+// scanning naturally.
+function processedSegments() {
+  if (!iconsForYields) return segments;
+  const out: typeof segments = [];
+  for (let i = 0; i < segments.length; i++) {
+    let s = segments[i];
+    const nextIconized = shouldIconize(segments[i + 1] || { text: '', entity: undefined } as any);
+    if (nextIconized && !s.entity) {
+      // "+" immediately before a [digit(s).optional-decimal] then a SPACE
+      // that's about to become an iconized yield — strip the "+".
+      // Won't match "+20%" (no space after digits), "+Cult" (no digit), or
+      // standalone "+" with non-yield text following.
+      const t = s.text.replace(/(^|\s)\+(?=[\d.]+\s)/g, '$1');
+      s = { ...s, text: t };
+    }
+    out.push(s);
+  }
+  return out;
+}
+const renderSegs = processedSegments();
+---
+
+{renderSegs.map(s => (
+  s.entity
+    ? <Term entity={s.entity} label={s.text} showIcon={showIcons} iconOnly={shouldIconize(s)} />
+    : <Fragment>{s.text}</Fragment>
+))}

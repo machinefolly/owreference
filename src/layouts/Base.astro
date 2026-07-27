@@ -1,0 +1,239 @@
+---
+import '../styles/theme.css';
+import '../styles/nation-tokens.css';
+import patch from '../../data/patch.json';
+import { TABS, SECTIONS } from '../data/tabs';
+
+interface Props {
+  title: string;
+  active?: string;
+  pageStats?: { label: string; value: string | number }[];
+  pageMark?: string;
+  // Editorial eyebrow line above the page title (small caps, gold).
+  eyebrow?: string;
+  description?: string;
+  ogImage?: string;
+}
+const { title, active, pageStats, pageMark, eyebrow, description, ogImage } = Astro.props;
+const base = import.meta.env.BASE_URL;
+
+const SITE_NAME = "Old World Reference";
+const SITE_TAGLINE = "the alcaras spreadsheet, in your browser";
+const DEFAULT_DESC =
+  "Complete reference for Mohawk Games' Old World — every nation, family, shrine, wonder, tech, law, unit, promotion, and game mechanic, pulled directly from the game's XML and source code and updated each patch.";
+
+const pageDesc = description || DEFAULT_DESC;
+const fullTitle = `${title} · ${SITE_NAME}`;
+
+// Build canonical URL from Astro.url + base. Falls back gracefully in dev.
+const siteOrigin = Astro.site?.origin || 'https://alcaras.github.io';
+const canonicalUrl = new URL(Astro.url.pathname, siteOrigin).href;
+const ogImageUrl = ogImage
+  ? new URL(base + ogImage, siteOrigin).href
+  : new URL(base + 'img/crests/rome.png', siteOrigin).href;  // sensible fallback crest
+
+// Header nav and the home-page catalog share ONE source of truth: every
+// tabs.ts entry with status 'built', grouped by section. The header renders
+// sections as dropdowns so all pages stay reachable without a link soup.
+const navSections = SECTIONS
+  .map(section => ({
+    section,
+    items: TABS.filter(t => t.section === section && t.status === 'built'),
+  }))
+  .filter(s => s.items.length > 0);
+const activeSection = navSections.find(s => s.items.some(t => t.slug === active))?.section;
+
+const syncedDate = new Date(patch.syncedAt);
+const syncedLabel = syncedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+const buildLabel = (patch as any).buildId || patch.version;
+const updatedAt = (patch as any).updatedAt;
+const updatedLabel = updatedAt
+  ? new Date(updatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  : null;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={pageDesc} />
+    <link rel="canonical" href={canonicalUrl} />
+
+    <!-- Favicon: the Old World royal crown (the Legitimacy mark, our logo) -->
+    <link rel="icon" href={`${base}favicon.ico`} sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href={`${base}favicon-32x32.png`} />
+    <link rel="icon" type="image/png" sizes="16x16" href={`${base}favicon-16x16.png`} />
+    <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
+    <meta name="theme-color" content="#0e0f12" />
+
+    <!-- Open Graph (Discord, Slack, Facebook, LinkedIn unfurls) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={pageDesc} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+
+    <!-- Twitter card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={pageDesc} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <meta name="keywords" content="Old World, Mohawk Games, 4X strategy, game reference, nations, families, technologies, wonders, laws, units, promotions, shrines, Old World wiki" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header class="hdr">
+      <div class="hdr__inner">
+        <a class="hdr__brand" href={base}>
+          <span class="hdr__mark" aria-hidden="true">
+            <img src={`${base}img/icons/yields/legitimacy.png`} alt="" />
+          </span>
+          <span class="hdr__title-wrap">
+            <span class="hdr__sub">Old World</span>
+            <span class="hdr__title">Reference</span>
+          </span>
+        </a>
+        <nav class="hdr__nav" aria-label="Site sections">
+          {navSections.map(({ section, items }) => (
+            items.length === 1 ? (
+              <a
+                href={`${base}${items[0].slug}`}
+                class={`hdr__navlink ${active === items[0].slug ? 'is-active' : ''}`}
+              >{items[0].label}</a>
+            ) : (
+            <details class="hdr__menu" data-section={section}>
+              <summary class={`hdr__navlink ${activeSection === section ? 'is-active' : ''}`}>
+                {section}<span class="hdr__caret" aria-hidden="true">▾</span>
+              </summary>
+              <div class="hdr__panel">
+                {items.map(t => (
+                  <a
+                    href={`${base}${t.slug}`}
+                    class={`hdr__panellink ${active === t.slug ? 'is-active' : ''}`}
+                  >
+                    <span class="hdr__panelicon" aria-hidden="true">{t.icon}</span>
+                    {t.label}
+                  </a>
+                ))}
+              </div>
+            </details>
+            )
+          ))}
+        </nav>
+        <script is:inline>
+          // Only one header menu open at a time; close on outside click / Esc.
+          document.addEventListener('click', (e) => {
+            const open = document.querySelectorAll('details.hdr__menu[open]');
+            for (const d of open) {
+              if (!d.contains(e.target)) d.removeAttribute('open');
+            }
+            const hit = e.target.closest?.('details.hdr__menu');
+            if (hit) {
+              for (const d of open) if (d !== hit) d.removeAttribute('open');
+            }
+          });
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+              document.querySelectorAll('details.hdr__menu[open]')
+                .forEach(d => d.removeAttribute('open'));
+            }
+          });
+        </script>
+        <details class="hdr__mobilemenu">
+          <summary class="hdr__navlink">Menu<span class="hdr__caret" aria-hidden="true">▾</span></summary>
+          <nav class="hdr__mobilepanel" aria-label="All pages">
+            {navSections.map(({ section, items }) => (
+              <div class="hdr__mgroup">
+                <div class="hdr__mgroup-label">{section}</div>
+                {items.map(t => (
+                  <a
+                    href={`${base}${t.slug}`}
+                    class={`hdr__panellink ${active === t.slug ? 'is-active' : ''}`}
+                  >
+                    <span class="hdr__panelicon" aria-hidden="true">{t.icon}</span>
+                    {t.label}
+                  </a>
+                ))}
+              </div>
+            ))}
+          </nav>
+        </details>
+        <span class="hdr__spacer" aria-hidden="true"></span>
+        <label class="hdr__search">
+          <span class="hdr__search-ico" aria-hidden="true">⌕</span>
+          <input
+            id="site-search"
+            type="search"
+            placeholder="Filter page…"
+            aria-label="Filter rows on the current page"
+            autocomplete="off"
+          />
+          <kbd>/</kbd>
+        </label>
+        <script is:inline>
+          // "/" focuses the page filter (unless already typing somewhere)
+          document.addEventListener('keydown', (e) => {
+            if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            const s = document.getElementById('site-search');
+            if (s) { e.preventDefault(); s.focus(); }
+          });
+        </script>
+      </div>
+    </header>
+
+    <main class="main">
+      {pageStats && (
+        <div class="page-meta">
+          <div>
+            {eyebrow && <div class="page-eyebrow">{eyebrow}</div>}
+            <h1 class="page-title">
+              {pageMark && <span class="page-title__mark">{pageMark}</span>}
+              {title}
+            </h1>
+          </div>
+          <div class="page-stats">
+            {pageStats.map(s => (
+              <span class="stat"><b>{s.value}</b> {s.label}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <slot />
+
+      <footer class="foot">
+        <div class="foot__col">
+          <span class="foot__label">Build</span>
+          <span class="foot__val">{buildLabel}</span>
+          {updatedLabel && (
+            <>
+              <span class="foot__dot">·</span>
+              <span class="foot__val foot__val--dim">game updated {updatedLabel}</span>
+            </>
+          )}
+          <span class="foot__dot">·</span>
+          <span class="foot__val foot__val--dim">synced {syncedLabel}</span>
+        </div>
+        <div class="foot__col foot__col--right">
+          <a href="https://github.com/alcaras/owreference/blob/main/CHANGELOG.md">Changelog</a>
+          <span class="foot__dot">·</span>
+          <a href="https://github.com/alcaras/owreference">Source</a>
+          <span class="foot__dot">·</span>
+          <a href="https://mohawkgames.com/oldworld/" rel="noopener" target="_blank">Old World</a>
+        </div>
+      </footer>
+    </main>
+
+  </body>
+</html>

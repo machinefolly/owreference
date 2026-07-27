@@ -1,0 +1,459 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import data from '../data/shrines.json';
+import nations from '../data/nations.json';
+
+const base = import.meta.env.BASE_URL;
+
+const { groups } = data;
+
+// War, Fire and Hunting are the "military" shrines — colour them all red
+// (training) regardless of their literal signature yield (Fire→iron, Hunting→
+// food), so the tier reads as a thematic group.
+const SHRINE_COLOR_OVERRIDE: Record<string, string> = { FIRE: 'training', HUNTING: 'training' };
+const shrineColor = (type: string, primaryYield: string) =>
+  SHRINE_COLOR_OVERRIDE[type] || primaryYield;
+
+// ── Type × nation matrix (the spreadsheet's signature view) ──
+// One row per (type, effect signature): a type whose shrines differ in
+// output splits into separate rows — e.g. the two Wisdom variants
+// (adjacent Odeon vs adjacent Courthouse), exactly like the sheet.
+const matrixNations = [...nations]
+  .filter(n => (data.shrines as any[]).some(s => s.nation.slug === n.slug))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+const matrixRows: {
+  type: string; label: string; primaryYield: string;
+  outputs: string[]; effects: string[];
+  byNation: Record<string, any>; count: number; isDynasty: boolean;
+}[] = [];
+for (const g of groups) {
+  const bySig = new Map<string, any[]>();
+  for (const s of g.shrines) {
+    const sig = [...s.outputs, ...s.effects].join('|');
+    if (!bySig.has(sig)) bySig.set(sig, []);
+    bySig.get(sig)!.push(s);
+  }
+  for (const list of bySig.values()) {
+    const byNation: Record<string, any> = {};
+    for (const s of list) byNation[s.nation.slug] = s;
+    matrixRows.push({
+      type: g.type, label: g.label, primaryYield: g.primaryYield,
+      outputs: list[0].outputs, effects: list[0].effects,
+      byNation, count: list.length,
+      // Dynasty-locked variants (e.g. Greece's Serapis under the Ptolemy
+      // dynasty) aren't standard MP fare — drop them to the bottom.
+      isDynasty: list.every(s => !!s.dynastyPrereq),
+    });
+  }
+}
+// Stable sort: dynasty-only rows sink to the bottom, everything else keeps
+// its group order.
+matrixRows.sort((a, b) => (a.isDynasty ? 1 : 0) - (b.isDynasty ? 1 : 0));
+
+// ── Type reference key (the spreadsheet's "what each type gives" legend) ──
+// One card per *signature* of each type, drawn from the standard (non-dynasty)
+// shrines. Most types collapse to a single card; a type whose shrines genuinely
+// differ (Wisdom — adjacent Odeon vs adjacent Courthouse) splits into one card
+// per variant, distinguished by its adjacency target.
+type RefCard = {
+  type: string; label: string; primaryYield: string; colorYield: string;
+  outputs: string[]; effects: string[]; count: number;
+  variant: string; anchorId: string;
+};
+const typeRef: RefCard[] = [];
+for (const g of groups) {
+  const std = g.shrines.filter((s: any) => !s.dynastyPrereq);
+  const src = std.length ? std : g.shrines;
+  // Distinct signatures, preserving first-seen order.
+  const bySig = new Map<string, any[]>();
+  for (const s of src) {
+    const sig = [...s.outputs, ...s.effects].join('|');
+    if (!bySig.has(sig)) bySig.set(sig, []);
+    bySig.get(sig)!.push(s);
+  }
+  const sigLists = [...bySig.values()];
+  const multi = sigLists.length > 1;
+  const lc = g.type.toLowerCase();
+  sigLists.forEach((list, i) => {
+    const s = list[0];
+    // Variant tag = the differing adjacency target (Odeon / Courthouse).
+    const m = [...s.outputs, ...s.effects].join(' ').match(/adjacent (\w+)/);
+    const variant = multi ? (m ? m[1] : `${i + 1}`) : '';
+    typeRef.push({
+      type: g.type, label: g.label, primaryYield: g.primaryYield,
+      colorYield: shrineColor(g.type, g.primaryYield),
+      outputs: s.outputs, effects: s.effects, count: list.length,
+      variant,
+      anchorId: i === 0 ? `type-${lc}` : `type-${lc}-${(variant || i).toString().toLowerCase()}`,
+    });
+  });
+}
+
+// Mirrors `SHRINE_GLYPH` in nations.astro — keeps the type headlines visually
+// linked across pages.
+const SHRINE_GLYPH: Record<string, string> = {
+  LOVE: '♥', WAR: '⚔', WATER: '≋', FIRE: '🜂',
+  KINGSHIP: '♔', SUN: '☀', WISDOM: '✦',
+  HEARTH: '◔', HEALING: '✚', HUNTING: '⌬', UNDERWORLD: '⚱',
+};
+
+---
+
+<Base
+  title="Shrines"
+  active="shrines"
+  pageMark="🔱"
+  pageStats={[
+    { label: 'shrines', value: data.totals.shrines },
+    { label: 'types',   value: groups.length },
+    ...(data.build ? [
+      { label: 'cost',  value: data.build.costs.join(', ') },
+      { label: 'build', value: `${data.build.turns} worker turns` },
+    ] : []),
+  ]}
+>
+  <p class="lede">
+    Every <LinkedText text="Pagan Religion" /> has a unique pool of
+    <b>Shrines</b> — one per <LinkedText text="deity" /> — that found and spread
+    that religion. Each shrine belongs to a <em>type</em> (War, Kingship,
+    Wisdom, …) which determines its signature yield and adjacency. With
+    <LinkedText text="Polytheism" /> a nation can build unlimited shrines.
+    {data.build && (
+      <Fragment> All shrines cost <LinkedText text={data.build.costs.join(', ')} /> and take a
+      <LinkedText text="Worker" /> {data.build.turns} turns to build (base — terrain, hills and
+      out-of-family territory can add turns).</Fragment>
+    )}
+  </p>
+
+  <div class="legend legend--types">
+    <span class="legend__label">Shrine types</span>
+    {groups.map(g => (
+      <a class={`chip yield-${shrineColor(g.type, g.primaryYield)}`} href={`#type-${g.type.toLowerCase()}`}>
+        <img class="chip__icon" src={`${base}img/icons/shrines/${g.type.toLowerCase()}.png`} alt="" />
+        {g.label}
+        <span class="chip__count">{g.shrines.length}</span>
+      </a>
+    ))}
+  </div>
+
+  <div class="grid">
+    <div class="grid__scroll">
+      <table class="ntbl ntbl--shrinematrix" aria-label="Shrine types by nation">
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner">
+              <span class="rowlabel__small">Nation →</span>
+              <span class="rowlabel__big">Type ↓</span>
+            </th>
+            <th class="nhdr nhdr--family">Effects</th>
+            {matrixNations.map(n => (
+              <th class={`nhdr n-${n.slug}`} data-nation={n.slug}>
+                <div class="nhdr__inner">
+                  <a class="nhdr__link" href={`${base}nations/${n.slug}`}>
+                    <img class="nhdr__crest" src={`${base}img/crests/${n.slug}.png`} alt="" />
+                    <span class="nhdr__name">{n.name}</span>
+                  </a>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {matrixRows.map(row => (
+            <tr class={row.isDynasty ? 'sm-row sm-row--dynasty' : 'sm-row'}>
+              <th class={`rowlabel sm-type yield-${shrineColor(row.type, row.primaryYield)}`} scope="row">
+                <a class="sm-type__link" href={`#type-${row.type.toLowerCase()}`}>
+                  <img class="sm-type__icon" src={`${base}img/icons/shrines/${row.type.toLowerCase()}.png`} alt="" />
+                  {row.label}
+                </a>
+                {row.isDynasty && <span class="sm-type__dyn">dynasty only</span>}
+              </th>
+              <td class={`cell yield-${shrineColor(row.type, row.primaryYield)} sm-fx`}>
+                {[...row.outputs, ...row.effects].map(e => (
+                  <div class="sm-fx__line"><LinkedText text={e} showIcons={false} iconsForYields={true} /></div>
+                ))}
+              </td>
+              {matrixNations.map(n => {
+                const s = row.byNation[n.slug];
+                if (!s) {
+                  return <td class="cell is-empty" data-nation={n.slug}><span class="cell__dash">—</span></td>;
+                }
+                return (
+                  <td class="cell sm-deity" data-nation={n.slug}>
+                    <a href={`#${s.slug}`} class="sm-deity__link" style={`--nation-accent: ${n.color?.bg || 'var(--gold)'}`}>
+                      {s.deity}
+                      {s.dynastyPrereq && <span class="sm-deity__req">{s.dynastyPrereq} dynasty</span>}
+                    </a>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2 class="tref-head">Shrine type reference</h2>
+  <p class="tref-sub">
+    What every shrine of each type yields and the adjacencies it rewards.
+    All shrines cost <b>40 <LinkedText text="Stone" /></b>, take an
+    <b>Acolyte</b> specialist, and are unlimited under <LinkedText text="Polytheism" />.
+  </p>
+
+  <div id="shrines-grid" class="tref-grid">
+    {typeRef.map(t => (
+      <article
+        class={`tref yield-${t.colorYield}`}
+        id={t.anchorId}
+        data-type={t.type.toLowerCase()}
+      >
+        <img
+          class="tref__art"
+          src={`${base}img/icons/shrines/${t.type.toLowerCase()}.png`}
+          alt={`${t.label} shrine`}
+          loading="lazy"
+        />
+        <div class="tref__name">
+          <span class="tref__type">{t.label}{t.variant && <span class="tref__variant">{t.variant}</span>}</span>
+          <span class="tref__count">{t.count} shrines</span>
+        </div>
+        <div class="tref__fx">
+          {t.outputs.map(o => (
+            <div class="tref__out"><LinkedText text={o} showIcons={false} iconsForYields={true} /></div>
+          ))}
+          {t.effects.map(e => (
+            <div class="tref__eff"><LinkedText text={e} showIcons={false} iconsForYields={true} /></div>
+          ))}
+        </div>
+      </article>
+    ))}
+  </div>
+
+  <script is:inline>
+    // Filter the type-reference cards by the global search input.
+    (function () {
+      const input = document.getElementById('site-search');
+      const grid = document.getElementById('shrines-grid');
+      if (!input || !grid) return;
+      const cards = Array.from(grid.querySelectorAll('.tref'));
+      function apply() {
+        const q = (input.value || '').trim().toLowerCase();
+        for (const card of cards) {
+          const match = !q || (card.textContent || '').toLowerCase().includes(q);
+          card.classList.toggle('is-hidden', !match);
+        }
+      }
+      input.addEventListener('input', apply);
+      apply();
+    })();
+
+    // Crosshair: highlight the hovered row + its nation column in the matrix.
+    (function () {
+      const table = document.querySelector('.ntbl--shrinematrix');
+      if (!table) return;
+      let curRow = null;
+      let curCells = [];
+      function clear() {
+        if (curRow) curRow.classList.remove('is-rowhl');
+        for (const c of curCells) c.classList.remove('is-colhl');
+        curRow = null; curCells = [];
+      }
+      table.addEventListener('mouseover', (e) => {
+        const cell = e.target.closest('td, th');
+        if (!cell || !table.contains(cell)) return;
+        clear();
+        const row = cell.closest('tr');
+        if (row) { row.classList.add('is-rowhl'); curRow = row; }
+        const slug = cell.getAttribute('data-nation');
+        if (slug) {
+          curCells = Array.from(table.querySelectorAll('[data-nation="' + slug + '"]'));
+          for (const c of curCells) c.classList.add('is-colhl');
+        }
+      });
+      table.addEventListener('mouseleave', clear);
+    })();
+  </script>
+</Base>
+
+<style>
+  .lede {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    line-height: 1.55;
+    max-width: 70ch;
+    margin: 0.4rem 0 1.2rem;
+  }
+  .lede b { color: var(--text); }
+
+  /* ── Type × nation matrix ── */
+  .grid { margin: 0 0 1.6rem; }
+  .ntbl--shrinematrix .rowlabel { min-width: 7.5rem; }
+
+  /* Colour the type sidebar (left column) by shrine-type yield — the data
+     cells keep the per-nation accent, so type lives on the rail and nation in
+     the grid. .rowlabel defaults to --bg, so paint the fill explicitly (black
+     scrim for contrast; light tokens carry a dark --yield-fg). */
+  .ntbl--shrinematrix .sm-type {
+    background: var(--yield-bg, var(--bg-elev));
+    background-image: linear-gradient(rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.28));
+    color: var(--yield-fg, var(--text));
+  }
+  .ntbl--shrinematrix .sm-type__link { color: var(--yield-fg, var(--text)); }
+
+  /* Crosshair hover — tint the hovered row + nation column. Inset box-shadow
+     overlays whatever yield/nation background a cell already carries. */
+  .ntbl--shrinematrix tr.is-rowhl > *,
+  .ntbl--shrinematrix .is-colhl {
+    box-shadow: inset 0 0 0 9999px rgba(201, 160, 74, 0.13);
+  }
+  /* Intersection cell reads a touch hotter so the crossing point is clear. */
+  .ntbl--shrinematrix tr.is-rowhl > .is-colhl {
+    box-shadow: inset 0 0 0 9999px rgba(201, 160, 74, 0.24);
+  }
+  .sm-type__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .sm-type__link:hover { color: var(--gold); text-decoration: none; }
+  .sm-type__icon { width: 1.3rem; height: 1.3rem; object-fit: contain; }
+  .sm-fx { min-width: 13rem; }
+  .sm-fx__line { font-size: 0.76rem; line-height: 1.45; }
+  .sm-deity { white-space: nowrap; }
+  .sm-deity__link {
+    display: inline-flex;
+    flex-direction: column;
+    color: var(--text);
+    font-size: 0.82rem;
+    text-decoration: none;
+    border-left: 3px solid var(--nation-accent, var(--border));
+    padding-left: 0.45rem;
+  }
+  .sm-deity__link:hover { color: var(--gold); text-decoration: none; }
+  .sm-deity__req {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    color: var(--text-faint);
+  }
+
+  .legend--types { margin-bottom: 1.2rem; }
+  .chip__glyph { margin-right: 0.2rem; font-size: 0.9em; }
+  .chip__count {
+    margin-left: 0.3rem;
+    opacity: 0.6;
+    font-family: var(--font-mono);
+    font-size: 0.7em;
+  }
+
+  .sm-type__dyn {
+    display: block;
+    margin-top: 0.15rem;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    /* Inherit the type rail's --yield-fg and dim it, not the fixed --text-faint
+       grey — that token is tuned for the dark base and washes out on the
+       yield-coloured rail. */
+    color: inherit;
+    opacity: 0.7;
+  }
+  .sm-row--dynasty .rowlabel,
+  .sm-row--dynasty .cell {
+    border-top: 2px solid color-mix(in srgb, var(--gold) 35%, transparent);
+  }
+  .sm-row--dynasty { opacity: 0.92; }
+
+  /* ── Type reference grid (signature yields per shrine type) ── */
+  .tref-head {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    margin: 1.8rem 0 0.2rem;
+  }
+  .tref-sub {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    max-width: 70ch;
+    margin: 0 0 0.9rem;
+  }
+  .tref-sub b { color: var(--text); }
+
+  .tref-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 0.5rem;
+  }
+  .tref {
+    display: grid;
+    grid-template-columns: 58px minmax(5.5rem, auto) 1fr;
+    align-items: stretch;
+    background: var(--yield-bg, var(--bg-elev));
+    color: var(--yield-fg, var(--text));
+    background-image: linear-gradient(100deg, rgba(0,0,0,0.34), rgba(0,0,0,0.10) 38%, rgba(255,255,255,0.04));
+    border: 1px solid color-mix(in srgb, var(--yield-bg, var(--bg-elev-2)) 50%, #000 50%);
+    border-radius: 6px;
+    overflow: hidden;
+    scroll-margin-top: 4rem;
+  }
+  .tref__art {
+    width: 58px;
+    height: 100%;
+    min-height: 64px;
+    object-fit: cover;
+    object-position: center 30%;
+    display: block;
+    border-right: 1px solid color-mix(in srgb, var(--yield-bg, #000) 55%, #000 45%);
+  }
+  .tref__name {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.1rem;
+    padding: 0.4rem 0.55rem;
+    border-right: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  }
+  .tref__type {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.92rem;
+    line-height: 1.1;
+  }
+  .tref__variant {
+    display: block;
+    font-family: var(--font-ui);
+    font-weight: 500;
+    font-size: 0.62rem;
+    font-style: italic;
+    /* Inherit the card's --yield-fg and dim it, not the fixed --text-faint grey
+       (tuned for the dark base) which washes out on the yield-coloured card. */
+    color: inherit;
+    opacity: 0.7;
+    margin-top: 0.05rem;
+  }
+  .tref__count {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.03em;
+    opacity: 0.65;
+  }
+  .tref__fx {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.12rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.76rem;
+    line-height: 1.32;
+  }
+  .tref__out { font-weight: 600; }
+  .tref__eff { opacity: 0.9; font-size: 0.72rem; }
+</style>

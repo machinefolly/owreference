@@ -1,0 +1,23 @@
+---
+import Base from '../layouts/Base.astro';
+import UnitsTable from '../components/UnitsTable.astro';
+import allUnits from '../data/units.json';
+
+// Normal units only — the roster any nation can build. Unique (nation-gated)
+// and tribal/barbarian units live on their own pages. Classification comes
+// straight from units.json's `category` field (built by build_unit_damage.py).
+// This page lists ALL of them; military-units / civilian-units split the same
+// roster by `isMilitary`. Non-buildable units (production 0, e.g. the Explorer —
+// granted by Hanno the Navigator's dynasty, not trained) are excluded: this is
+// the roster you can actually build.
+const units = (allUnits as any[]).filter(u => u.category === 'normal' && u.production > 0);
+---
+
+<Base
+  title="Units"
+  active="units"
+  pageMark="🛡️"
+  description={`The ${units.length} standard units of Old World any nation can build — Infantry, Polearm, Mounted, Ranged, Siege and Ship classes, plus civilian and disciple units. Each row shows Strength, Movement, Range, training cost, material cost, upkeep, tech prerequisite and combat counters, all derived from the game's unit.xml. Nation-unique and tribal units are listed separately.`}
+>
+  <UnitsTable units={units} heading="Units" noun="units" />
+</Base>

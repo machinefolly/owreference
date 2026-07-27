@@ -1,0 +1,130 @@
+---
+// One structured reward. Yield rewards show the ×1 amount + scaling tags and a
+// hover cities×turns table (data-scale). Flat rewards that carry a `tip` (e.g.
+// "Gain trait: X") get a hover effect list (data-tip). The floating-tooltip
+// script (run once per page) also serves requirement chips' data-tip elsewhere.
+import LinkedText from './LinkedText.astro';
+import { classifyYield } from '../lib/entities';
+
+const { reward } = Astro.props as { reward: any };
+const base = import.meta.env.BASE_URL;
+const r = reward;
+
+const isYield = r.yield && (r.base != null || r.eachCity != null);
+const yk = (r.yield || classifyYield(r.text || '')?.toLowerCase() || 'misc');
+const amt = r.base != null ? r.base : r.eachCity;
+const sign = amt >= 0 ? '+' : '';
+const yieldName = r.yield ? r.yield.charAt(0).toUpperCase() + r.yield.slice(1) : '';
+
+const scaleData = isYield
+  ? JSON.stringify(r.base != null
+      ? { y: yieldName, b: r.base, p: r.per || 0 }
+      : { y: yieldName, e: r.eachCity })
+  : null;
+const tip = (!isYield && Array.isArray(r.tip) && r.tip.length) ? r.tip.join('\n') : null;
+---
+{isYield ? (
+  <span class={`chip rwd yield-${yk}`} data-scale={scaleData} tabindex="0">
+    <img class="rwd__ico" src={`${base}img/icons/yields/${r.yield}.png`} alt="" onerror="this.style.display='none'" />
+    <b class="rwd__amt">{sign}{amt}</b>
+    <span class="rwd__yld">{yieldName}</span>
+    {r.per ? <span class="rwd__tag">{r.per >= 0 ? '+' : ''}{r.per}/city</span> : null}
+    {r.eachCity != null ? <span class="rwd__tag">each city</span> : null}
+    <span class="rwd__tag rwd__tag--turn">↗ turn</span>
+  </span>
+) : (
+  <span class={`chip yield-${yk}${tip ? ' has-tip' : ''}`}
+        data-tip={tip ?? undefined} data-tip-title={tip ? (r.tipTitle ?? undefined) : undefined}
+        tabindex={tip ? 0 : undefined}>
+    <LinkedText text={r.text} showIcons={false} />
+    {r.note && <span class="rwd__note">({r.note})</span>}
+  </span>
+)}
+
+<script>
+  // One floating tooltip per page, delegated on [data-scale] (yield reward →
+  // cities×turns table) and [data-tip] (effect/requirement → titled list).
+  (function () {
+    if ((window as any).__rwdTip) return;
+    (window as any).__rwdTip = true;
+    const CITIES = [4, 7, 10, 15], TURNS = [30, 50, 70, 90], INFL = 60;
+    const CAP: Record<string, number> = { training: 2000, civics: 2000 };
+    const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+
+    const css = document.createElement('style');
+    css.textContent =
+      '#rwd-tip{position:fixed;z-index:9999;display:none;background:var(--bg-elev-2,#1a1b1f);' +
+      'border:1px solid var(--border-strong,#444);border-radius:8px;padding:8px 10px;' +
+      'box-shadow:0 6px 24px rgba(0,0,0,.5);font-size:12px;color:var(--text,#eee);max-width:24rem;pointer-events:none}' +
+      '#rwd-tip h4{margin:0 0 5px;font-size:11.5px;font-weight:600;color:var(--text,#eee);font-family:var(--font-display,serif)}' +
+      '#rwd-tip table{border-collapse:collapse;font-family:var(--font-mono,monospace);font-variant-numeric:tabular-nums}' +
+      '#rwd-tip th,#rwd-tip td{padding:2px 7px;text-align:right}' +
+      '#rwd-tip thead th{color:var(--text-faint,#999);font-weight:500;border-bottom:1px solid var(--border,#333)}' +
+      '#rwd-tip tbody th{color:var(--text-faint,#999);font-weight:500;text-align:left}' +
+      '#rwd-tip ul{margin:0;padding:0 0 0 1rem;list-style:disc}' +
+      '#rwd-tip li{margin:1px 0;line-height:1.35}' +
+      '#rwd-tip .rwd-tip__note{margin-top:5px;color:var(--text-faint,#999);font-size:10.5px}';
+    document.head.appendChild(css);
+    const tip = document.createElement('div');
+    tip.id = 'rwd-tip';
+    document.body.appendChild(tip);
+
+    function reward(d: any, cities: number, turn: number): number {
+      let v = d.e != null ? d.e * cities : d.b + (d.p || 0) * cities;
+      if (turn > INFL) v = Math.floor((v * turn) / INFL);
+      const a = Math.abs(v), rt = a > 100 ? 10 : a > 50 ? 5 : a > 10 ? 2 : 0;
+      if (rt) v = Math.round(v / rt) * rt;
+      const cap = CAP[(d.y || '').toLowerCase()];
+      if (cap) v = Math.min(v, cap);
+      return v;
+    }
+    function scaleHtml(d: any): string {
+      let h = `<h4>${esc(d.y)} reward — cities × turn</h4><table><thead><tr><th>cities</th>` +
+        TURNS.map((t) => `<th>t${t}</th>`).join('') + '</tr></thead><tbody>';
+      for (const c of CITIES)
+        h += `<tr><th>${c}</th>` + TURNS.map((t) => { const v = reward(d, c, t); return `<td>${v >= 0 ? '+' : ''}${v}</td>`; }).join('') + '</tr>';
+      return h + '</tbody></table><div class="rwd-tip__note">×1 up to turn 60, then ×(turn÷60). Per-city added before the multiplier.</div>';
+    }
+    function tipHtml(el: HTMLElement): string {
+      const title = el.getAttribute('data-tip-title') || '';
+      const lines = (el.getAttribute('data-tip') || '').split('\n').filter(Boolean);
+      return (title ? `<h4>${esc(title)}</h4>` : '') + '<ul>' + lines.map((l) => `<li>${esc(l)}</li>`).join('') + '</ul>';
+    }
+
+    function show(el: HTMLElement) {
+      if (el.hasAttribute('data-scale')) {
+        let d; try { d = JSON.parse(el.getAttribute('data-scale') || ''); } catch { return; }
+        tip.innerHTML = scaleHtml(d);
+      } else if (el.hasAttribute('data-tip')) {
+        tip.innerHTML = tipHtml(el);
+      } else return;
+      tip.style.display = 'block';
+      const r = el.getBoundingClientRect(), tr = tip.getBoundingClientRect();
+      let top = r.bottom + 6;
+      if (top + tr.height > window.innerHeight - 8) top = Math.max(8, r.top - tr.height - 6);
+      tip.style.top = top + 'px';
+      tip.style.left = Math.max(8, Math.min(r.left, window.innerWidth - tr.width - 8)) + 'px';
+    }
+    const hide = () => { tip.style.display = 'none'; };
+    const SEL = '[data-scale],[data-tip]';
+    document.addEventListener('mouseover', (e) => { const el = (e.target as HTMLElement).closest(SEL) as HTMLElement | null; if (el) show(el); });
+    document.addEventListener('mouseout', (e) => { const el = (e.target as HTMLElement).closest(SEL); if (el && !el.contains((e as MouseEvent).relatedTarget as Node)) hide(); });
+    document.addEventListener('focusin', (e) => { const el = (e.target as HTMLElement).closest(SEL) as HTMLElement | null; if (el) show(el); else hide(); });
+    document.addEventListener('scroll', hide, true);
+  })();
+</script>
+
+<style>
+  .rwd { display: inline-flex; align-items: center; gap: 0.28rem; cursor: help; }
+  .rwd__ico { width: 14px; height: 14px; object-fit: contain; }
+  .rwd__amt { font-family: var(--font-mono); font-weight: 700; }
+  .rwd__yld { font-weight: 500; }
+  .rwd__tag {
+    font-family: var(--font-mono); font-size: 0.86em; opacity: 0.82;
+    padding-left: 0.32rem; margin-left: 0.18rem;
+    border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  }
+  .rwd__tag--turn { letter-spacing: 0.01em; }
+  .rwd__note { opacity: 0.58; font-style: italic; font-size: 0.92em; margin-left: 0.3rem; }
+  .chip.has-tip { cursor: help; border-bottom: 1px dotted color-mix(in srgb, currentColor 50%, transparent); }
+</style>

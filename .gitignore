@@ -1,0 +1,28 @@
+node_modules/
+dist/
+.astro/
+.DS_Store
+*.log
+*.pyc
+__pycache__/
+.env*
+!.env.example
+
+# Game source — only XML/Infos is consumed by the pipeline
+reference/Graphics/
+reference/Source/
+reference/XML/Mods/
+reference/XML/UI/
+reference/**/.DS_Store
+
+# Extracted art IS committed so GH Pages serves it
+# public/img/ is committed
+# ...except the event-popup backgrounds — lush 2048×1024 PNGs, ~300 MB total,
+# extracted locally for browsing, not shipped to GH Pages.
+public/img/events/
+
+# Design handoffs: keep the unpacked folder for reference, skip the zip
+from-design/*.zip
+
+# Claude Code session artifacts
+.claude/

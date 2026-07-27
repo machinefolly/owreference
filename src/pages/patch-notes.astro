@@ -1,0 +1,208 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import patchnotes from '../data/patchnotes.json';
+
+const base = import.meta.env.BASE_URL;
+
+const fmtDate = (d: string) =>
+  d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }) : '';
+
+const SECTION_ICON: Record<string, string> = {
+  Design: '🎯', Balance: '⚖️', Programming: '⚙️', AI: '🤖', UI: '🖥',
+  'Bugs Fixed': '🐛', Modding: '🧩', Notes: '📝',
+};
+
+const DLC = new Set([
+  'Empires of the Indus', 'Wonders and Dynasties', 'Wrath of Gods',
+  'Behind the Throne', 'The Sacred and the Profane', 'Heroes of the Aegean',
+  'Pharaohs of the Nile', 'Rise of Carthage',
+]);
+function splitDlc(text: string): { body: string; dlc: string | null } {
+  const m = /^(.*?)\s*\(([^()]+)\)\s*$/.exec(text);
+  if (m && DLC.has(m[2])) return { body: m[1], dlc: m[2] };
+  return { body: text, dlc: null };
+}
+
+const KIND_GLYPH: Record<string, string> = { added: '+', removed: '−', changed: '~' };
+---
+
+<Base
+  title="Patch notes"
+  active="patch-notes"
+  pageMark="🛠"
+  description="Old World patch notes — Mohawk's official build notes for each release, mirrored and entity-linked, with each note paired to the exact game-data change it produced, plus any data changes not mentioned in the notes."
+>
+  <div class="page-meta">
+    <h1 class="page-title">Patch notes</h1>
+    <div class="page-stats">
+      <span class="stat"><b>{patchnotes.length}</b> patch{patchnotes.length === 1 ? '' : 'es'}</span>
+    </div>
+  </div>
+
+  <p class="pn-lede">
+    Mohawk's official <a href="https://github.com/MohawkGames/main_buildnotes" target="_blank" rel="noopener">build notes</a>
+    for each release — mirrored and auto-linked. Under each note we surface the exact change our
+    reference detected in the game's XML when it re-synced the patch, and list any data changes the
+    notes don't mention.
+  </p>
+
+  {patchnotes.map((p: any) => (
+    <article class="pn">
+      <header class="pn__head">
+        <span class="pn__num">{p.version}</span>
+        {p.date && <span class="pn__date">{fmtDate(p.date)}</span>}
+        {p.buildId && <span class="pn__build">Steam build {p.buildId}</span>}
+      </header>
+
+      {p.sections.map((s: any) => (
+        <section class="pn-sec">
+          <h2 class="pn-sec__title"><span class="pn-sec__icon">{SECTION_ICON[s.name] || '•'}</span>{s.name}</h2>
+          <ul class="pn-notes">
+            {s.items.map((it: any) => {
+              const { body, dlc } = splitDlc(it.text);
+              return (
+                <li class="pn-note">
+                  <div class="pn-note__text">
+                    <LinkedText text={body} showIcons={false} iconsForYields={true} />
+                    {dlc && <span class="pn-dlc">{dlc}</span>}
+                  </div>
+                  {it.related && it.related.length > 0 && (
+                    <ul class="pn-rel">
+                      {it.related.map((r: any) => (
+                        <li class={`pn-rel__row pn-rel__row--${r.kind}`}>
+                          <span class="pn-rel__glyph">{KIND_GLYPH[r.kind] || '·'}</span>
+                          <span class="pn-rel__file">{r.file.replace(/_/g, ' ').replace(/\.json$/, '')}</span>
+                          <span class="pn-rel__detail">
+                            <b><LinkedText text={r.entity.split(' · ')[0]} showIcons={false} /></b>
+                            <span class="pn-rel__sep">·</span>
+                            <LinkedText text={r.detail} showIcons={false} iconsForYields={true} />
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+
+      {p.otherChanges && p.otherChanges.length > 0 && (
+        <section class="pn-sec pn-sec--other">
+          <h2 class="pn-sec__title"><span class="pn-sec__icon">🔎</span>Other detected changes
+            <span class="pn-sec__hint">in the game data, not mentioned in the official notes</span>
+          </h2>
+          <ul class="pn-other">
+            {p.otherChanges.map((g: any) => (
+              <li class="pn-other__group">
+                <span class="pn-other__file">{g.file.replace(/_/g, ' ')}</span>
+                <ul class="pn-rel">
+                  {g.records.map((r: any) => (
+                    <li class={`pn-rel__row pn-rel__row--${r.kind}`}>
+                      <span class="pn-rel__glyph">{KIND_GLYPH[r.kind] || '·'}</span>
+                      <span class="pn-rel__detail">
+                        <b><LinkedText text={r.entity.split(' · ')[0]} showIcons={false} /></b>
+                        <span class="pn-rel__sep">·</span>
+                        <LinkedText text={r.detail} showIcons={false} iconsForYields={true} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+          <p class="pn-other__note">
+            Derived by diffing this patch's generated data against the previous patch's — so it
+            reflects game-XML changes, not reference-site tooling. Engine, AI and UI changes leave
+            no XML trace and won't appear here.
+          </p>
+        </section>
+      )}
+    </article>
+  ))}
+</Base>
+
+<style>
+  .pn-lede {
+    color: var(--text-dim); font-size: 0.92rem; line-height: 1.55;
+    max-width: 74ch; margin: 0 0 1.8rem;
+  }
+  .pn-lede a { color: var(--gold-soft); }
+
+  .pn { margin: 0 0 2.4rem; }
+  .pn__head {
+    display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap;
+    padding-bottom: 0.5rem; margin-bottom: 1.1rem;
+    border-bottom: 2px solid var(--gold-deep);
+  }
+  .pn__num { font-family: var(--font-display); font-weight: 600; font-size: 1.7rem; color: var(--text); }
+  .pn__date { font-family: var(--font-ui); font-size: 0.86rem; color: var(--gold-soft); }
+  .pn__build {
+    margin-left: auto; font-family: var(--font-mono); font-size: 0.62rem;
+    color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 0.1rem 0.4rem;
+  }
+
+  .pn-sec { margin: 0 0 1.5rem; }
+  .pn-sec__title {
+    display: flex; align-items: baseline; gap: 0.45rem;
+    font-family: var(--font-ui); font-weight: 600;
+    font-size: 0.74rem; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--gold-soft); margin: 0 0 0.7rem;
+  }
+  .pn-sec__icon { font-size: 1rem; }
+  .pn-sec__hint {
+    text-transform: none; letter-spacing: 0; font-weight: 400;
+    font-family: var(--font-ui); font-size: 0.72rem; color: var(--text-faint);
+  }
+
+  .pn-notes { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .pn-note {
+    border-left: 3px solid var(--border-strong);
+    padding: 0.1rem 0 0.1rem 0.85rem;
+  }
+  .pn-note:has(.pn-rel) { border-left-color: var(--gold-deep); }
+  .pn-note__text { font-size: 0.94rem; line-height: 1.5; color: var(--text); }
+  .pn-dlc {
+    display: inline-block; margin-left: 0.4rem;
+    font-family: var(--font-mono); font-size: 0.56rem;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--gold-soft); border: 1px solid var(--gold-deep);
+    border-radius: 3px; padding: 0 0.3em; vertical-align: 0.1em; white-space: nowrap;
+  }
+
+  /* Correlated / detected data changes */
+  .pn-rel { list-style: none; margin: 0.35rem 0 0.2rem; padding: 0; display: flex; flex-direction: column; gap: 0.12rem; }
+  .pn-rel__row {
+    display: flex; align-items: baseline; gap: 0.45rem;
+    font-size: 0.8rem; line-height: 1.35;
+    padding: 0.12rem 0.5rem; border-radius: 4px;
+    background: var(--bg-elev);
+  }
+  .pn-rel__glyph {
+    font-family: var(--font-mono); font-weight: 700; width: 0.8em; text-align: center; flex: none;
+  }
+  .pn-rel__row--added .pn-rel__glyph { color: #4caf7d; }
+  .pn-rel__row--removed .pn-rel__glyph { color: #d46e6e; }
+  .pn-rel__row--changed .pn-rel__glyph { color: var(--gold-soft); }
+  .pn-rel__file {
+    font-family: var(--font-mono); font-size: 0.66rem; color: var(--text-faint);
+    text-transform: uppercase; letter-spacing: 0.04em; flex: none;
+    min-width: 8.5em;
+  }
+  .pn-rel__detail { color: var(--text-soft); }
+  .pn-rel__detail b { color: var(--text); font-weight: 600; }
+  .pn-rel__sep { color: var(--text-faint); margin: 0 0.3em; }
+
+  .pn-sec--other { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  .pn-other { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  .pn-other__group { }
+  .pn-other__file {
+    font-family: var(--font-mono); font-size: 0.74rem; color: var(--gold-soft);
+    text-transform: capitalize;
+  }
+  .pn-other__group .pn-rel { margin-top: 0.25rem; }
+  .pn-other__group .pn-rel__file { display: none; }
+  .pn-other__note { margin: 0.9rem 0 0; font-size: 0.72rem; color: var(--text-faint); font-style: italic; max-width: 74ch; }
+</style>

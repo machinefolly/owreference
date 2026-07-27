@@ -1,0 +1,241 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import specialists from '../data/specialists.json';
+import { classifyYield } from '../lib/entities';
+
+const base = import.meta.env.BASE_URL;
+const TIER_NAME: Record<number, string> = { 1: 'Apprentice', 2: 'Master', 3: 'Elder' };
+const civicsIco = 'img/icons/yields/civics.png';
+const foodIco = 'img/icons/yields/food.png';
+
+type Spec = typeof specialists[number];
+
+// Urban specialists are the tiered (I/II/III) classes that work urban
+// improvements (Scribe→Library, Officer→Barracks, …). One row per class,
+// the three tiers shown side-by-side.
+const byClass = new Map<string, Spec[]>();
+for (const s of specialists as Spec[]) {
+  if (s.tier <= 0) continue;
+  const arr = byClass.get(s.classSlug) || [];
+  arr.push(s);
+  byClass.set(s.classSlug, arr);
+}
+for (const arr of byClass.values()) arr.sort((a, b) => a.tier - b.tier);
+
+const groups = Array.from(byClass.entries())
+  .sort((a, b) => a[1][0].class.localeCompare(b[1][0].class));
+
+const searchBlobs: Record<string, string> = {};
+for (const [slug, arr] of groups) searchBlobs[slug] = JSON.stringify(arr).toLowerCase();
+---
+
+<Base title="Urban Specialists" active="urban-specialists" pageMark="🏺" pageStats={[
+  { label: 'specialists', value: groups.length },
+  { label: 'tiers', value: 3 },
+]}>
+  <div class="grid" id="us-grid">
+    <div class="grid__scroll">
+      <table class="ntbl">
+        <thead>
+          <tr>
+            <th class="nhdr nhdr--col"><div class="nhdr__inner"><span class="nhdr__name">Specialist</span></div></th>
+            <th class="nhdr nhdr--col"><div class="nhdr__inner"><span class="nhdr__name">Slots Into</span></div></th>
+            <th class="nhdr nhdr--col"><div class="nhdr__inner"><span class="nhdr__name">Apprentice</span></div></th>
+            <th class="nhdr nhdr--col"><div class="nhdr__inner"><span class="nhdr__name">Master</span></div></th>
+            <th class="nhdr nhdr--col"><div class="nhdr__inner"><span class="nhdr__name">Elder</span></div></th>
+            <th class="nhdr nhdr--col"><div class="nhdr__inner"><span class="nhdr__name">Cost</span></div></th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map(([slug, arr]) => {
+            const byTier: (Spec | undefined)[] = [undefined, undefined, undefined, undefined];
+            for (const s of arr) byTier[s.tier] = s;
+            return (
+              <tr data-row={slug}>
+                <th class="rowlabel rowlabel--item" scope="row" id={slug}>
+                  <div class="spec-head">
+                    <img class="spec-head__icon" src={`${base}${arr[0].icon}`} alt="" loading="lazy" onerror="this.style.display='none'" />
+                    <div class="spec-head__text">
+                      <div class="item__name">{arr[0].class}</div>
+                      <div class="item__sub">urban · 3 tiers</div>
+                    </div>
+                  </div>
+                </th>
+                <td class="cell yield-misc">
+                  {arr[0].slotImprovements && arr[0].slotImprovements.length > 0
+                    ? arr[0].slotImprovements.map((si: {class: string; icon: string}) => (
+                        <div class="terrain-tag slot-tag">
+                          {si.icon && <img class="slot-ico" src={`${base}${si.icon}`} alt="" loading="lazy" onerror="this.style.display='none'" />}
+                          <LinkedText text={si.class} />
+                        </div>
+                      ))
+                    : <span class="cell__dash">—</span>}
+                </td>
+                {[1, 2, 3].map(tier => {
+                  const s = byTier[tier];
+                  if (!s) return <td class="cell is-empty"><span class="cell__dash">—</span></td>;
+                  const lines = [...(s.yieldsMain || []), ...(s.yieldsExtra || []), ...(s.yieldsPerCitizen || []), ...(s.classModifiers || [])];
+                  return (
+                    <td class="cell cell--effects">
+                      {lines.length > 0 ? lines.map((line: string) => {
+                        const yk = classifyYield(line)?.toLowerCase() || 'misc';
+                        // "Culture Level" is a city-rank qualifier, not the
+                        // Culture yield — don't let iconsForYields swap the
+                        // word for the Culture glyph.
+                        const iconize = !/Culture Level/.test(line);
+                        return <div class={`effect yield-${yk}`}><LinkedText text={line} iconsForYields={iconize} /></div>;
+                      }) : <span class="cell__dash">—</span>}
+                    </td>
+                  );
+                })}
+                <td class="cell yield-misc">
+                  {[1, 2, 3].map(tier => {
+                    const s = byTier[tier];
+                    if (!s) return null;
+                    return (
+                      <div class="cost-row">
+                        <span class="cost-tier">{TIER_NAME[tier]}</span>
+                        <span class="cost-num">{s.civicsCost}</span>
+                        <img class="cost-ico" src={`${base}${civicsIco}`} alt="Civics" title="Civics" />
+                        <span class="cost-num">{s.foodCost}</span>
+                        <img class="cost-ico" src={`${base}${foodIco}`} alt="Food" title="Food" />
+                      </div>
+                    );
+                  })}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="application/json" id="us-search-blobs" set:html={JSON.stringify(searchBlobs)}></script>
+  <script is:inline>
+    (function () {
+      const input = document.getElementById('site-search');
+      const blobNode = document.getElementById('us-search-blobs');
+      const grid = document.getElementById('us-grid');
+      if (!input || !blobNode || !grid) return;
+      let blobs;
+      try { blobs = JSON.parse(blobNode.textContent || '{}'); } catch { return; }
+      function apply() {
+        const q = (input.value || '').trim().toLowerCase();
+        for (const slug of Object.keys(blobs)) {
+          const row = grid.querySelector('tr[data-row="' + slug + '"]');
+          if (!row) continue;
+          row.classList.toggle('is-hidden', !!q && !blobs[slug].includes(q));
+        }
+      }
+      input.addEventListener('input', apply);
+      apply();
+    })();
+  </script>
+  <script is:inline>
+    (function () {
+      const table = document.querySelector('#us-grid table.ntbl');
+      if (!table || !table.tHead) return;
+      const ths = Array.from(table.tHead.rows[0].cells);
+      ths.forEach((th, ci) => {
+        th.classList.add('is-sortable');
+        th.addEventListener('click', () => {
+          const tb = table.tBodies[0];
+          const rows = Array.from(tb.rows).filter(r => !r.classList.contains('srow'));
+          const asc = th.getAttribute('aria-sort') !== 'ascending';
+          ths.forEach(h => h.removeAttribute('aria-sort'));
+          th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+          const val = r => {
+            const c = r.cells[ci];
+            const t = (c ? c.textContent : '').trim();
+            const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+            return { t, n: (t && !isNaN(n)) ? n : null };
+          };
+          rows.sort((a, b) => {
+            const ka = val(a), kb = val(b);
+            let r;
+            if (ka.n !== null && kb.n !== null) r = ka.n - kb.n;
+            else if (ka.n !== null) r = -1;
+            else if (kb.n !== null) r = 1;
+            else r = ka.t.localeCompare(kb.t);
+            return asc ? r : -r;
+          });
+          rows.forEach(r => tb.appendChild(r));
+        });
+      });
+    })();
+  </script>
+</Base>
+
+<style>
+  .nhdr--col {
+    background: var(--bg-elev-2);
+    color: var(--text);
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    min-width: 8rem;
+  }
+  .nhdr--col .nhdr__name {
+    font-family: var(--font-display);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+  }
+  .rowlabel--item {
+    text-align: left;
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-elev);
+    min-width: 11rem;
+    border-right: 1px solid var(--border);
+  }
+  .spec-head { display: flex; align-items: center; gap: 0.5rem; }
+  .spec-head__icon {
+    width: 30px; height: 30px; object-fit: contain;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
+  }
+  .item__name {
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  .item__sub {
+    font-style: italic;
+    color: var(--text-faint);
+    font-size: 0.66rem;
+    margin-top: 0.1rem;
+  }
+  .terrain-tag {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    margin: 0.1rem 0.2rem 0.1rem 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    background: var(--bg);
+  }
+  .cost-row {
+    display: flex; align-items: center; gap: 0.25rem;
+    font-size: 0.7rem; color: var(--text-dim); padding: 0.06rem 0;
+  }
+  .cost-tier { min-width: 5.2em; color: var(--text-faint); font-style: italic; }
+  .cost-ico { width: 13px; height: 13px; object-fit: contain; margin-right: 0.15rem; }
+  .cost-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .slot-tag { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .slot-ico { width: 15px; height: 15px; object-fit: contain; flex: none; }
+  .nhdr.is-sortable { cursor: pointer; user-select: none; }
+  .nhdr.is-sortable:hover { filter: brightness(1.12); }
+  .nhdr.is-sortable .nhdr__name::after { content: '⇅'; opacity: 0.35; font-size: 0.85em; margin-left: 0.3em; }
+  .nhdr[aria-sort='ascending'] .nhdr__name::after { content: '↑'; opacity: 0.9; }
+  .nhdr[aria-sort='descending'] .nhdr__name::after { content: '↓'; opacity: 0.9; }
+</style>

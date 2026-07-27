@@ -1,0 +1,726 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import RewardChip from '../components/RewardChip.astro';
+import OptionRaw from '../components/OptionRaw.astro';
+import { classifyYield, yieldColors } from '../lib/entities';
+import missions from '../data/missions.json';
+
+interface Props {
+  slug: string;
+  pageMark: string;
+  active?: string;
+}
+const { slug, pageMark, active = slug } = Astro.props;
+const base = import.meta.env.BASE_URL;
+
+const mission = missions.find(m => m.slug === slug)!;
+
+function pct(p: number): string {
+  return (p * 100).toFixed(0) + '%';
+}
+
+// "2" or "2+" — iMissionTurnsScaled adds a game-speed-scaled term on top.
+const turnsLabel = `${mission.turns}${mission.turnsScaled ? '+' : ''}`;
+const instant = mission.turns === 0 && !mission.turnsScaled;
+const durationLabel = instant
+  ? 'Instant'
+  : `${turnsLabel} turn${mission.turns === 1 && !mission.turnsScaled ? '' : 's'}`;
+const eventGroups = mission.eventGroups || [];
+---
+
+<Base title={mission.name} active={active} pageMark={pageMark} pageStats={[
+  { label: 'turns', value: instant ? 'instant' : turnsLabel },
+  { label: 'outcomes', value: mission.outcomes.length },
+  ...(eventGroups.length > 0
+    ? [{ label: 'event stories', value: eventGroups.reduce((n, g) => n + g.events.length, 0) }]
+    : []),
+]}>
+  <section class="mission-overview">
+    {mission.description && (
+      <p class="mission-desc"><LinkedText text={mission.description} /></p>
+    )}
+
+    <div class="mission-chips">
+      {mission.subject && (
+        <span class="chip chip--neutral">
+          <span class="chip__label">Run by</span>
+          <strong>{mission.subject}</strong>
+        </span>
+      )}
+      {mission.techPrereq && (
+        <a class="chip chip--neutral" href={`${base}technologies#${mission.techPrereq.slug}`}>
+          <span class="chip__label">Requires tech</span>
+          <strong>{mission.techPrereq.label}</strong>
+        </a>
+      )}
+      {mission.dlc && (
+        <span class="chip chip--neutral">
+          <span class="chip__label">Requires</span>
+          <strong>{mission.dlc}</strong>
+        </span>
+      )}
+      <span class="chip chip--neutral">
+        <span class="chip__label">Duration</span>
+        <strong>{durationLabel}</strong>
+      </span>
+      {mission.cost.map(c => (
+        <span class={`chip yield-${c.yield}`}>
+          <span class="chip__label">Cost</span>
+          <strong>{c.value} {c.label}</strong>
+        </span>
+      ))}
+      {(mission.opinionCost || []).map(c => (
+        <span class={`chip yield-${c.yield}`} title="Base amount — scales with the target's opinion of you">
+          <span class="chip__label">Cost (opinion-scaled)</span>
+          <strong>{c.value} {c.label}</strong>
+        </span>
+      ))}
+      {eventGroups.length > 0 && (
+        <a class="chip chip--neutral" href="#events" title="Jump to the event stories this mission can fire">
+          <span class="chip__label">Events</span>
+          <strong>{eventGroups.reduce((n, g) => n + g.events.length, 0)} stories ↓</strong>
+        </a>
+      )}
+    </div>
+
+    {(mission.variantNotes || []).length > 0 && (
+      <div class="variant-notes">
+        {mission.variantNotes.map((n: string) => <p class="variant-note">{n}</p>)}
+      </div>
+    )}
+  </section>
+
+  <section class="outcomes">
+    <h2 class="outcomes__title">Outcomes</h2>
+    <p class="outcomes__sub">
+      A {mission.totalDiceWeight}-sided die rolls when the mission completes; results are weighted as shown.
+      Subject character ratings (e.g., Wisdom on Steal Research) shift the roll.
+    </p>
+
+    <div class="outcome-grid">
+      {mission.outcomes.map(o => {
+        // Color the outcome card by its primary reward yield (or fall back to misc)
+        const firstReward = o.rewards.find(r => r.value != null);
+        const yieldKey = firstReward
+          ? firstReward.yield
+          : (o.name.toLowerCase().includes('event') ? 'misc' : (classifyYield(o.name)?.toLowerCase() || 'misc'));
+        const isEvent = o.id.endsWith('_EVENT');
+        const isExposed = o.id.includes('EXPOSED');
+        return (
+          <div class={`outcome-card yield-${yieldKey} ${isEvent ? 'outcome-card--event' : ''} ${isExposed ? 'outcome-card--exposed' : ''}`}>
+            <div class="outcome-card__head">
+              <span class="outcome-card__name">{o.name}</span>
+              <span class="outcome-card__prob">
+                <span class="outcome-card__weight">{o.weight} / {mission.totalDiceWeight}</span>
+                <span class="outcome-card__pct">{pct(o.probability)}</span>
+              </span>
+            </div>
+            {o.description && (
+              <p class="outcome-card__desc"><LinkedText text={o.description} /></p>
+            )}
+            {o.ratingModifier.length > 0 && (
+              <div class="outcome-card__ratings">
+                <span class="outcome-card__ratings-label">Rating influence</span>
+                {o.ratingModifier.map(r => (
+                  <span class={`chip yield-${r.rating}`} title={r.label}>
+                    {r.value > 0 ? '+' : ''}{r.value} × <img class="rating-chip-ico" src={`${base}img/icons/ratings/${r.label.toLowerCase()}.png`} alt={r.label} onerror="this.replaceWith(document.createTextNode(this.alt))" />
+                  </span>
+                ))}
+              </div>
+            )}
+            {o.rewards.length > 0 && (
+              <ul class="outcome-card__rewards">
+                {o.rewards.map(r => (
+                  <li>
+                    {r.value == null ? (
+                      <span>{r.label}</span>
+                    ) : (
+                      <>
+                        <span class="reward-val">{r.scope.endsWith('Per')
+                          ? `+${r.value} per ${r.scope.startsWith('aiOther') ? 'Rival City' : 'City'}`
+                          : `+${r.value}`}</span>
+                        <span class="reward-yield">{r.label}</span>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
+
+    {(mission.scaling || mission.scalingNote) ? (
+      <p class="outcomes__legend">
+        <strong>Base</strong> is the flat reward; <strong>per City</strong> values stack with the size of your empire
+        (see Reward scaling below). The subject's character rating shifts the dice — e.g. Wisdom raises the
+        Steal Research success chance — but does not change the yield amounts.
+      </p>
+    ) : (
+      <p class="outcomes__legend">
+        The subject's character rating shifts the dice where a <strong>Rating influence</strong> is shown,
+        but does not change the reward amounts.
+      </p>
+    )}
+  </section>
+
+  {!mission.scaling && mission.scalingNote && (
+    <section class="scaling">
+      <h2 class="outcomes__title">Reward scaling</h2>
+      <p class="outcomes__sub">{mission.scalingNote}</p>
+    </section>
+  )}
+
+  {mission.scaling && (
+    <section class="scaling">
+      <h2 class="outcomes__title">Reward scaling</h2>
+      <p class="outcomes__sub">
+        The base reward is <strong>{mission.scaling.base} {mission.scaling.label}</strong>
+        {mission.scaling.per ? <> plus <strong>{mission.scaling.per} {mission.scaling.label} per {(mission.scaling.citiesLabel || 'city').toLowerCase().replace('your ', '').replace('rival cities', 'rival city')}</strong></> : null},
+        so it grows with {mission.scaling.citiesLabel === 'Rival cities' ? "the rival's empire (you steal more from larger rivals)" : 'your empire'}. The game then scales it up further as the match goes on
+        (a turn/price multiplier that depends on game state, the same in both modes). <strong>Competitive Mode does not change mission rewards.</strong>
+      </p>
+      <table class={`ntbl scale-tbl yield-${mission.scaling.yield}`}>
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner"><span class="nhdr__name">{mission.scaling.citiesLabel || 'Cities'}</span></th>
+            {mission.scaling.byCities.map(c => <th class="nhdr nhdr--col nhdr--num"><span class="nhdr__name">{c.cities}</span></th>)}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="rowlabel" scope="row">
+              <span class="scale-tbl__yield">
+                <img class="scale-tbl__ico" src={`${base}img/icons/yields/${mission.scaling.yield}.png`} alt="" onerror="this.style.display='none'" />
+                {mission.scaling.label} reward
+              </span>
+            </th>
+            {mission.scaling.byCities.map(c => (
+              <td class={`cell cell--num yield-${mission.scaling.yield}`}>
+                <span class="numval">+{c.value}</span>
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+      <p class="outcomes__legend">Reward at base game-yield rate (turns 0–{mission.scaling.inflationTurns}). After turn {mission.scaling.inflationTurns} the reward grows in proportion to the turn number.</p>
+
+      <div
+        class={`calc yield-${mission.scaling.yield}`}
+        data-rawbase={mission.scaling.rawBase}
+        data-rawper={mission.scaling.rawPer}
+        data-cap={mission.scaling.cap ?? ''}
+        data-infl={mission.scaling.inflationTurns}
+        data-yield={mission.scaling.yield}
+        data-label={mission.scaling.label}
+        data-color={yieldColors[`YIELD_${mission.scaling.yield.toUpperCase()}`] || '#c9a04a'}
+      >
+        <h3 class="calc__title">Reward calculator</h3>
+        <div class="calc__controls">
+          <label class="calc__field">
+            <span class="calc__field-label">{mission.scaling.citiesLabel || 'Cities'} <output id="calc-cities-out">4</output></span>
+            <input type="range" id="calc-cities" min="1" max="20" value="4" step="1" />
+          </label>
+          <label class="calc__field">
+            <span class="calc__field-label">Turn <output id="calc-turn-out">90</output></span>
+            <input type="range" id="calc-turn" min="0" max="300" value="90" step="1" />
+          </label>
+        </div>
+        <div class="calc__readout">
+          <span class="calc__big">
+            <img class="calc__ico" src={`${base}img/icons/yields/${mission.scaling.yield}.png`} alt="" onerror="this.style.display='none'" />
+            <span id="calc-reward">+15</span>
+            <span class="calc__unit">{mission.scaling.label}</span>
+          </span>
+          <span class="calc__formula" id="calc-formula"></span>
+        </div>
+        <svg id="calc-graph" class="calc__graph" viewBox="0 0 640 300" role="img" aria-label="Reward versus turn"></svg>
+        <p class="calc__hint">Drag the sliders, or scrub across the graph to set the turn. Faint lines show other city counts. Competitive Mode does not change these rewards.</p>
+      </div>
+    </section>
+  )}
+
+  {eventGroups.length > 0 && (
+    <section class="events" id="events">
+      <h2 class="outcomes__title">Events</h2>
+      <p class="evt-caveat">⚠ <b>Story weights are not in-game odds.</b> Each story is gated by character/empire
+      conditions (some hidden), so real frequency is filtered in ways the XML can't predict. The weight is the raw
+      XML knob, not a probability.</p>
+
+      <div class="mode-toggle" role="radiogroup" aria-label="Detail level">
+        <button type="button" class="mode-toggle__btn is-active" data-evmode="raw" role="radio" aria-checked="true">Raw XML</button>
+        <button type="button" class="mode-toggle__btn" data-evmode="human" role="radio" aria-checked="false">Humanized</button>
+      </div>
+
+      <div class="evt-list evtmode" data-mode="raw" id="evtmode">
+        {eventGroups.map(g => (
+          <>
+            {g.isEventResult ? (
+              <p class="outcomes__sub evtgrp__intro">
+                <strong>{pct(g.probability)}</strong> of the time (a {g.weight}/{g.total} dice
+                result) the mission fires an <strong>event</strong> instead of its normal reward — then one of the
+                {' '}{g.events.length} stories below is drawn, and you pick a response.
+                Bracketed values like <code>[character]</code> are filled in with the actual names in-game.
+              </p>
+            ) : (
+              <p class="outcomes__sub evtgrp__intro">
+                After the <strong>{g.outcomeName}</strong> result (a {g.weight}/{g.total} dice result, {pct(g.probability)}),
+                {g.events.length === 1 ? ' this follow-up story' : ` one of the ${g.events.length} follow-up stories below`} can
+                fire, conditions permitting. Bracketed values like <code>[character]</code> are filled in with the
+                actual names in-game.
+              </p>
+            )}
+            {g.events.map(ev => {
+          const ry = (r: any) => r.yield || classifyYield(r.text || '');
+          const evYield = (ev.guaranteed.map(ry).find(Boolean)
+            || ev.options.flatMap((o: any) => o.outcomes.flatMap((oc: any) => oc.rewards)).map(ry).find(Boolean)
+            || 'misc').toLowerCase();
+          return (
+            <details class={`evt yield-${evYield}`}>
+              <summary class="evt__summary">
+                <span class="evt__name">{ev.name}</span>
+                <span class="evt__meta">
+                  <span
+                    class={`chip--cm ${(ev as any).cmEligible !== false ? 'chip--cm-yes' : 'chip--cm-no'}`}
+                    title={(ev as any).cmEligible !== false
+                      ? 'Eligible in Competitive Mode'
+                      : 'Excluded when Competitive Events is on (Competitive Mode tournaments)'}
+                  >CM {(ev as any).cmEligible !== false ? '✓' : '✗'}</span>
+                  {(ev as any).minTurns && <span class="chip--turn" title="Earliest turn this event can fire (its own minimum, or its event class's)">Turn {(ev as any).minTurns}+</span>}
+                  <span class="evt__share" title="Raw iWeight — NOT a probability (see caveat above)">weight {ev.weight}</span>
+                  {ev.conditions.map((c: string) => <span class="chip chip--cond">{c}</span>)}
+                </span>
+              </summary>
+              <div class="evt__body">
+                {ev.guaranteed.length > 0 && (
+                  <div class="evt__guaranteed">
+                    <span class="evt__label">Always</span>
+                    {ev.guaranteed.map((g: any) => <RewardChip reward={g} />)}
+                  </div>
+                )}
+                <ul class="evt__opts">
+                  {ev.options.map((o: any) => (
+                    <li class="opt">
+                      <div class="opt__text">
+                        <span class="opt__bullet">▸</span>
+                        <LinkedText text={o.text || 'Resolve'} />
+                        {o.requirements.map((r: any) => (
+                          <span class="chip chip--req ev-human has-tip" data-tip-title="Requirement"
+                                data-tip={(r.tip || []).join('\n')} tabindex="0">{r.label}</span>
+                        ))}
+                      </div>
+                      <div class="opt__outcomes ev-human">
+                        {o.outcomes.map((oc: any) => (
+                          <div class="oc">
+                            {oc.probability < 1 && <span class="oc__prob">{pct(oc.probability)}</span>}
+                            <div class="oc__rewards">
+                              {oc.rewards.map((r: any) => <RewardChip reward={r} />)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {o.raw && <OptionRaw raw={o.raw} />}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          );
+        })}
+          </>
+        ))}
+      </div>
+    </section>
+  )}
+
+  <script is:inline>
+    // Reward calculator + reward-vs-turn graph. Replicates the game's
+    // getAdjustedValue for non-sellable yields: reward = (rawBase + rawPer×cities),
+    // then ×max(1, turn/inflationTurns) once past the inflation turn, rounded to a
+    // multiple (10/5/2 by magnitude) and capped, all at the ×10 internal scale.
+    (function () {
+      const root = document.querySelector('.calc');
+      const svg = document.getElementById('calc-graph');
+      if (!root || !svg) return;
+      // Robust SVG render: parse as SVG-namespaced nodes (innerHTML on an
+      // <svg> is unreliable across browsers) and swap them in.
+      function setSVG(el, inner) {
+        const doc = new DOMParser().parseFromString(
+          '<svg xmlns="http://www.w3.org/2000/svg">' + inner + '</svg>', 'image/svg+xml');
+        el.replaceChildren(...Array.from(doc.documentElement.childNodes));
+      }
+      const rawBase = +root.dataset.rawbase, rawPer = +root.dataset.rawper;
+      const cap = root.dataset.cap ? +root.dataset.cap : null;
+      const infl = +root.dataset.infl || 60;
+      const color = root.dataset.color || '#c9a04a';
+      const citiesIn = document.getElementById('calc-cities');
+      const turnIn = document.getElementById('calc-turn');
+      const citiesOut = document.getElementById('calc-cities-out');
+      const turnOut = document.getElementById('calc-turn-out');
+      const rewardEl = document.getElementById('calc-reward');
+      const formulaEl = document.getElementById('calc-formula');
+
+      const MAX_TURN = +turnIn.max, GHOSTS = [1, 3, 6, 10, 15];
+      const NS = 'http://www.w3.org/2000/svg';
+      const W = 640, H = 300, M = { l: 48, r: 16, t: 14, b: 30 };
+
+      // Reward (display-scale, shown raw in-game): (base + per×cities) then the
+      // turn ramp, rounded to a multiple by magnitude (matching the reference
+      // spreadsheet's round-to-nearest), then capped.
+      function reward(cities, turn) {
+        let v = rawBase + rawPer * cities;
+        if (turn > infl) v = Math.floor((v * turn) / infl);
+        const a = Math.abs(v), rt = a > 100 ? 10 : a > 50 ? 5 : a > 10 ? 2 : 0;
+        if (rt) v = Math.round(v / rt) * rt;
+        if (cap != null) v = Math.min(v, cap);
+        return v;
+      }
+
+      const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+      function draw() {
+        const cities = +citiesIn.value, turn = +turnIn.value;
+        citiesOut.textContent = cities;
+        turnOut.textContent = turn;
+        const rw = reward(cities, turn);
+        rewardEl.textContent = '+' + fmt(rw);
+
+        // Breakdown: pre-scale × multiplier
+        const pre = rawBase + rawPer * cities;
+        const mult = Math.max(1, turn / infl);
+        formulaEl.textContent =
+          `${fmt(rawBase)} + ${fmt(rawPer)}×${cities} = ${fmt(pre)}` +
+          (turn > infl ? `  ×${mult.toFixed(2)} (turn ${turn})` : `  (turn ≤ ${infl}: ×1)`) +
+          (cap != null && rw >= cap ? '  — capped' : '');
+
+        // Y domain from the tallest visible line at MAX_TURN.
+        const yMax = Math.max(reward(Math.max(cities, 15), MAX_TURN), reward(15, MAX_TURN), 1) * 1.08;
+        const xS = (t) => M.l + (t / MAX_TURN) * (W - M.l - M.r);
+        const yS = (v) => (H - M.b) - (v / yMax) * (H - M.t - M.b);
+        const linePts = (c) => {
+          let pts = '';
+          for (let t = 0; t <= MAX_TURN; t += 4) pts += `${xS(t).toFixed(1)},${yS(reward(c, t)).toFixed(1)} `;
+          return pts.trim();
+        };
+
+        let g = '';
+        // grid + axes
+        const yTicks = 4, xTicks = [0, infl, 120, 180, 240, 300].filter(t => t <= MAX_TURN);
+        for (let i = 0; i <= yTicks; i++) {
+          const v = (yMax / yTicks) * i, y = yS(v);
+          g += `<line x1="${M.l}" y1="${y}" x2="${W - M.r}" y2="${y}" class="cg-grid"/>`;
+          g += `<text x="${M.l - 6}" y="${y + 3}" class="cg-ylab">${fmt(Math.round(v * 10) / 10)}</text>`;
+        }
+        for (const t of xTicks) {
+          g += `<text x="${xS(t)}" y="${H - M.b + 16}" class="cg-xlab">${t}</text>`;
+        }
+        // ghost city lines
+        for (const c of GHOSTS) {
+          if (c === cities) continue;
+          g += `<polyline points="${linePts(c)}" class="cg-ghost"/>`;
+          g += `<text x="${W - M.r + 2}" y="${yS(reward(c, MAX_TURN)) + 3}" class="cg-ghostlab">${c}c</text>`;
+        }
+        // active line
+        g += `<polyline points="${linePts(cities)}" class="cg-active" style="stroke:${color}"/>`;
+        // turn guide + marker
+        const mx = xS(turn), my = yS(rw);
+        g += `<line x1="${mx}" y1="${M.t}" x2="${mx}" y2="${H - M.b}" class="cg-guide"/>`;
+        g += `<circle cx="${mx}" cy="${my}" r="4.5" class="cg-dot" style="fill:${color}"/>`;
+        g += `<text x="${Math.min(mx + 8, W - M.r - 30)}" y="${Math.max(my - 8, M.t + 10)}" class="cg-val">+${fmt(rw)}</text>`;
+        setSVG(svg, g);
+      }
+
+      function scrub(ev) {
+        const r = svg.getBoundingClientRect();
+        const px = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left) / r.width * W;
+        const t = Math.round(((px - M.l) / (W - M.l - M.r)) * MAX_TURN);
+        turnIn.value = Math.max(0, Math.min(MAX_TURN, t));
+        draw();
+      }
+      citiesIn.addEventListener('input', draw);
+      turnIn.addEventListener('input', draw);
+      let scrubbing = false;
+      svg.addEventListener('pointerdown', (e) => { scrubbing = true; scrub(e); });
+      svg.addEventListener('pointermove', (e) => { if (scrubbing) scrub(e); });
+      window.addEventListener('pointerup', () => { scrubbing = false; });
+      draw();
+    })();
+  </script>
+
+  <script is:inline>
+    (function () {
+      const root = document.getElementById('evtmode');
+      const btns = Array.from(document.querySelectorAll('.mode-toggle__btn'));
+      if (!root || !btns.length) return;
+      btns.forEach((btn) => btn.addEventListener('click', () => {
+        root.setAttribute('data-mode', btn.getAttribute('data-evmode'));
+        btns.forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle('is-active', on);
+          b.setAttribute('aria-checked', String(on));
+        });
+      }));
+    })();
+  </script>
+</Base>
+
+<style>
+  .evt-caveat {
+    font-size: 0.8rem; color: var(--text-dim); line-height: 1.45; max-width: 80ch;
+    margin: 0 0 0.8rem; padding: 0.5rem 0.7rem; border-radius: var(--radius-lg);
+    border: 1px solid color-mix(in srgb, #d4a24e 35%, var(--border));
+    background: color-mix(in srgb, #d4a24e 8%, transparent);
+  }
+  .evt-caveat b { color: var(--text); }
+  .mode-toggle { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; margin-bottom: 0.9rem; }
+  .mode-toggle__btn { font-family: var(--font-display); font-size: 0.76rem; padding: 0.32rem 0.7rem; background: var(--bg-elev); color: var(--text-dim); border: none; cursor: pointer; }
+  .mode-toggle__btn + .mode-toggle__btn { border-left: 1px solid var(--border-strong); }
+  .mode-toggle__btn:hover { color: var(--text); }
+  .mode-toggle__btn.is-active { background: color-mix(in srgb, var(--accent) 28%, var(--bg-elev) 72%); color: var(--text); }
+  .evtmode[data-mode='raw'] .ev-human { display: none; }
+  .evtmode[data-mode='human'] .ev-raw { display: none; }
+
+  .mission-overview { margin-bottom: 1.5rem; }
+  .variant-notes { margin-top: 0.8rem; }
+  .variant-note {
+    font-size: 0.78rem; color: var(--text-faint); line-height: 1.45;
+    margin: 0.25rem 0; max-width: 80ch;
+  }
+  .evtgrp__intro { margin: 0.6rem 0 0.2rem; }
+  .evt-list .evtgrp__intro:first-child { margin-top: 0; }
+  .mission-desc {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin: 0 0 1rem;
+    max-width: 70ch;
+  }
+  .mission-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+  .mission-chips .chip { gap: 0.5rem; padding: 0.3rem 0.7rem; font-size: 0.78rem; }
+  .chip__label {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
+
+  .outcomes { margin-top: 2rem; }
+  .outcomes__title {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+  .outcomes__sub {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    margin: 0 0 1rem;
+    max-width: 70ch;
+  }
+  .outcomes__legend {
+    margin-top: 1rem;
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    max-width: 70ch;
+  }
+  .outcomes__legend strong { color: var(--text-dim); }
+
+  .outcome-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.6rem;
+  }
+  .outcome-card {
+    background: var(--yield-bg, var(--bg-elev));
+    color: var(--yield-fg, var(--text));
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.20) 60%, rgba(0,0,0,0.36));
+    border: 1px solid color-mix(in srgb, var(--yield-bg, var(--border-strong)) 50%, #000 50%);
+    border-radius: var(--radius-lg);
+    padding: 0.7rem 0.9rem 0.8rem;
+  }
+  .outcome-card--event { background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.30) 60%, rgba(0,0,0,0.50)); }
+  .outcome-card--exposed { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06), inset 0 -2px 0 #d46e6e; }
+
+  .outcome-card__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.4rem;
+  }
+  .outcome-card__name {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+  }
+  .outcome-card__prob {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.1rem;
+  }
+  .outcome-card__pct {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .outcome-card__weight {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    opacity: 0.7;
+    letter-spacing: 0.04em;
+  }
+  .outcome-card__desc {
+    margin: 0 0 0.5rem;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    opacity: 0.92;
+  }
+  .outcome-card__ratings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+    align-items: center;
+  }
+  .rating-chip-ico { width: 14px; height: 14px; object-fit: contain; vertical-align: -2px; }
+  .outcome-card__ratings-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.55);
+    margin-right: 0.15rem;
+  }
+  .outcome-card__ratings .chip {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.45rem;
+  }
+  .outcome-card__rewards {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .outcome-card__rewards li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.78rem;
+    gap: 0.6rem;
+    padding: 0.15rem 0;
+    border-top: 1px dashed rgba(255,255,255,0.12);
+  }
+  .outcome-card__rewards li:first-child { border-top: 0; }
+  .reward-val {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .reward-yield { opacity: 0.78; }
+
+  /* ── Reward scaling table ── */
+  .scaling { margin-top: 2rem; }
+  .scale-tbl { width: auto; margin-top: 0.6rem; }
+  .scale-tbl .nhdr--col { background: var(--bg-elev-2); text-align: right; padding: 0.4rem 0.7rem; }
+  .scale-tbl .nhdr--num .nhdr__name { font-family: var(--font-mono); font-size: 0.82rem; }
+  .scale-tbl__yield { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; color: var(--text-dim); white-space: nowrap; }
+  .scale-tbl__ico { width: 15px; height: 15px; object-fit: contain; }
+  .scale-tbl .cell--num { text-align: right; padding: 0.35rem 0.7rem; }
+  .scale-tbl .numval { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 0.86rem; }
+
+  /* ── Events ── */
+  .events { margin-top: 2rem; }
+  .evt-list { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.8rem; }
+  .evt {
+    border: 1px solid var(--border);
+    border-left: 3px solid color-mix(in srgb, var(--yield-bg, var(--accent)) 70%, transparent);
+    border-radius: var(--radius-lg); background: var(--bg-elev); overflow: hidden;
+  }
+  .evt[open] { background: var(--bg-elev-2); }
+  .evt__summary {
+    display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+    padding: 0.5rem 0.8rem; cursor: pointer; list-style: none; user-select: none;
+  }
+  .evt__summary::-webkit-details-marker { display: none; }
+  .evt__summary::before {
+    content: '▸'; color: var(--text-faint); font-size: 0.8rem; transition: transform 0.12s; flex-shrink: 0;
+  }
+  .evt[open] .evt__summary::before { transform: rotate(90deg); }
+  .evt__summary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .evt__name { font-family: var(--font-display); font-weight: 600; font-size: 0.92rem; color: var(--text); }
+  .evt__meta { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-left: auto; }
+  .evt__share {
+    font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600;
+    color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+    padding: 0.08rem 0.4rem; border-radius: 5px;
+  }
+  /* Competitive-Mode eligibility (green/red) + earliest-fire turn markers */
+  .chip--cm { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.02em; padding: 0.06rem 0.42rem; border-radius: 5px; border: 1px solid transparent; }
+  .chip--cm-yes { color: #6ba368; background: color-mix(in srgb, #6ba368 14%, var(--bg-elev)); border-color: color-mix(in srgb, #6ba368 40%, transparent); }
+  .chip--cm-no  { color: #c25555; background: color-mix(in srgb, #c25555 14%, var(--bg-elev)); border-color: color-mix(in srgb, #c25555 40%, transparent); }
+  .chip--turn { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.02em; padding: 0.06rem 0.42rem; border-radius: 5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev)); border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); }
+  .chip--cond { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); padding: 0.06rem 0.42rem; font-size: 0.68rem; }
+  .chip--req { background: color-mix(in srgb, #6b5ea6 24%, var(--bg-elev)); color: var(--text); border: 1px solid color-mix(in srgb, #6b5ea6 45%, transparent); padding: 0.04rem 0.4rem; font-size: 0.66rem; margin-left: 0.4rem; }
+  .chip--req.has-tip { cursor: help; }
+
+  .evt__body { padding: 0 0.9rem 0.7rem 1.6rem; }
+  .evt__guaranteed { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .evt__label, .oc__prob { font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+
+  .evt__opts { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+  .opt { border-top: 1px dashed var(--border); padding-top: 0.45rem; }
+  .opt:first-child { border-top: 0; padding-top: 0; }
+  .opt__text { font-size: 0.85rem; color: var(--text); margin-bottom: 0.3rem; display: flex; align-items: baseline; gap: 0.35rem; flex-wrap: wrap; }
+  .opt__bullet { color: var(--accent); font-size: 0.7rem; }
+  .opt__outcomes { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 1rem; }
+  .oc { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+  .oc__prob {
+    font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; color: var(--text-dim);
+    min-width: 2.4rem; text-align: right;
+  }
+  .oc__rewards { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+  .oc__rewards .chip, .evt__guaranteed .chip { font-size: 0.72rem; padding: 0.08rem 0.45rem; }
+
+  /* ── Reward calculator + graph ── */
+  .calc {
+    margin-top: 1rem; padding: 1rem 1.1rem 1.1rem;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+    background: var(--bg-elev); max-width: 720px;
+  }
+  .calc__title { font-family: var(--font-display); font-size: 0.95rem; margin: 0 0 0.7rem; color: var(--text); }
+  .calc__controls { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem 1.2rem; margin-bottom: 0.8rem; }
+  .calc__field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .calc__field-label { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.04em; color: var(--text-dim); text-transform: uppercase; }
+  .calc__field-label output { color: var(--accent); font-weight: 700; margin-left: 0.35rem; font-size: 0.95rem; }
+  .calc__field input[type='range'] { width: 100%; accent-color: var(--accent); }
+  .calc__readout { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
+  .calc__big { display: inline-flex; align-items: center; gap: 0.4rem; font-family: var(--font-mono); font-weight: 700; font-size: 1.6rem; color: var(--text); }
+  .calc__ico { width: 22px; height: 22px; object-fit: contain; }
+  .calc__unit { font-family: var(--font-display); font-size: 0.95rem; font-weight: 600; color: var(--text-dim); }
+  .calc__formula { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-faint); }
+  .calc__graph { width: 100%; height: auto; display: block; background: var(--bg); border-radius: 8px; touch-action: none; cursor: crosshair; }
+  .calc__hint { font-size: 0.74rem; color: var(--text-faint); margin: 0.5rem 0 0; }
+
+  /* SVG graph internals (global selectors — they live inside the inline-set SVG) */
+  .calc__graph :global(.cg-grid) { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+  .calc__graph :global(.cg-ylab) { fill: var(--text-faint); font-size: 11px; font-family: var(--font-mono); text-anchor: end; }
+  .calc__graph :global(.cg-xlab) { fill: var(--text-faint); font-size: 11px; font-family: var(--font-mono); text-anchor: middle; }
+  .calc__graph :global(.cg-ghost) { fill: none; stroke: var(--text-faint); stroke-width: 1; opacity: 0.32; }
+  .calc__graph :global(.cg-ghostlab) { fill: var(--text-faint); font-size: 10px; font-family: var(--font-mono); opacity: 0.6; }
+  .calc__graph :global(.cg-active) { fill: none; stroke-width: 2.5; }
+  .calc__graph :global(.cg-guide) { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
+  .calc__graph :global(.cg-dot) { stroke: var(--bg); stroke-width: 2; }
+  .calc__graph :global(.cg-val) { fill: var(--text); font-size: 12px; font-weight: 700; font-family: var(--font-mono); }
+
+  @media (max-width: 520px) { .calc__controls { grid-template-columns: 1fr; } }
+</style>

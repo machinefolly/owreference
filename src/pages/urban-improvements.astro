@@ -1,0 +1,531 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import buildings from '../data/urban_improvements.json';
+import { classifyYield } from '../lib/entities';
+
+const base = import.meta.env.BASE_URL;
+
+type Building = typeof buildings[number];
+
+// Columns describe the attribute. Rows are items (inverted from Nations).
+type Col =
+  | { key: 'name';        label: 'Improvement' }
+  | { key: 'tech';        label: 'Tech' }
+  | { key: 'prereqs';     label: 'Other Prereq' }
+  | { key: 'cost';        label: 'Cost' }
+  | { key: 'build';       label: 'Build' }
+  | { key: 'upkeep';      label: 'Upkeep' }
+  | { key: 'specialist';  label: 'Specialist Slot' }
+  | { key: 'effects';     label: 'Effects' }
+  | { key: 'terrains';    label: 'Terrain' }
+  | { key: 'restrict';    label: 'Restrictions' };
+
+const cols: Col[] = [
+  { key: 'name',       label: 'Improvement' },
+  { key: 'tech',       label: 'Tech' },
+  { key: 'prereqs',    label: 'Other Prereq' },
+  { key: 'cost',       label: 'Cost' },
+  { key: 'build',      label: 'Build' },
+  { key: 'upkeep',     label: 'Upkeep' },
+  { key: 'specialist', label: 'Specialist Slot' },
+  { key: 'effects',    label: 'Effects' },
+  { key: 'terrains',   label: 'Terrain' },
+  { key: 'restrict',   label: 'Restrictions' },
+];
+
+// Culture prereq renders as the level emblem (Weak/Developing/Strong/
+// Legendary), not the spelled-out "X Culture" + a culture-yield icon.
+const cultureIcon: Record<string, string> = {
+  Weak: 'img/icons/culture/weak.png',
+  Developing: 'img/icons/culture/developing.png',
+  Strong: 'img/icons/culture/strong.png',
+  Legendary: 'img/icons/culture/legendary.png',
+};
+
+function otherPrereq(b: Building): string[] {
+  const out: string[] = [];
+  if (b.familyPrereq)  out.push(`${b.familyPrereq} Family`);
+  if (b.nationPrereq)  out.push(`${b.nationPrereq} only`);
+  if (b.lawPrereq)     out.push(`Law: ${b.lawPrereq}`);
+  return out;
+}
+
+// Per-column widths — .ntbl is table-layout:fixed, so without explicit widths
+// the 10 columns squeeze to the viewport and content overflows onto neighbours
+// on mobile. With these + the table min-width the cells wrap and the table
+// scrolls horizontally instead. (Mirrors rural-improvements.)
+const COL_W: Record<Col['key'], string> = {
+  name: '11rem', tech: '8rem', prereqs: '9rem', cost: '5rem', build: '5rem',
+  upkeep: '5rem', specialist: '8rem', effects: '13rem', terrains: '7.5rem',
+  restrict: '9rem',
+};
+
+const searchBlobs: Record<string, string> = {};
+for (const b of buildings) {
+  searchBlobs[b.slug] = JSON.stringify(b).toLowerCase();
+}
+
+const classCount = new Set(buildings.map(b => b.class)).size;
+
+// ── Building-line progression (legacy 🏡 Urban Buildings idiom) ──
+// One row per upgrade line, one column per culture tier, so the whole
+// Market → Grocer → Fair chain reads left-to-right at a glance.
+// Chains come from the XML upgrade links (upgradesTo / replaces names),
+// not from class, so a non-upgrading building still gets its own
+// single-cell line.
+const TIERS = ['Weak', 'Developing', 'Strong', 'Legendary'] as const;
+type Tier = typeof TIERS[number];
+
+const byName = new Map(buildings.map(b => [b.name, b]));
+const upgradeTargets = new Set(buildings.map(b => b.upgradesTo).filter(Boolean));
+
+// Chain bases: don't replace anything we know about, and aren't another
+// building's upgrade target.
+const chainBases = buildings.filter(b =>
+  !(b.replaces && byName.has(b.replaces)) && !upgradeTargets.has(b.name));
+
+type Chain = { label: string; tiers: Record<Tier, Building[]> };
+const chains: Chain[] = chainBases.map(start => {
+  const tiers: Record<Tier, Building[]> = { Weak: [], Developing: [], Strong: [], Legendary: [] };
+  const seen = new Set<string>();
+  let cur: Building | undefined = start;
+  while (cur && !seen.has(cur.name)) {
+    seen.add(cur.name);
+    // No culture prereq = buildable from the start → Weak column.
+    const tier: Tier = (TIERS as readonly string[]).includes(cur.culturePrereq)
+      ? cur.culturePrereq as Tier : 'Weak';
+    tiers[tier].push(cur);
+    cur = cur.upgradesTo ? byName.get(cur.upgradesTo) : undefined;
+  }
+  return { label: start.class.replace(/_/g, ' '), tiers };
+}).sort((a, b) => a.label.localeCompare(b.label));
+---
+
+<Base title="Urban Improvements" active="urban-improvements" pageMark="🏡" pageStats={[
+  { label: 'improvements', value: buildings.length },
+  { label: 'classes',      value: classCount },
+  { label: 'lines',        value: chains.length },
+]}>
+  <section class="lines">
+    <h2 class="lines__title">Building Lines</h2>
+    <p class="lines__sub">Each line upgrades as the city's culture level rises — names link to the full details below.</p>
+    <div class="grid__scroll">
+      <table class="ntbl">
+        <thead>
+          <tr>
+            <th class="nhdr nhdr--col nhdr--line" data-col="line">
+              <div class="nhdr__inner"><span class="nhdr__name">Line</span></div>
+            </th>
+            {TIERS.map(t => (
+              <th class="nhdr nhdr--col" data-col={t.toLowerCase()}>
+                <div class="nhdr__inner nhdr__inner--culture">
+                  <img class="culture-ico" src={`${base}${cultureIcon[t]}`} alt="" onerror="this.style.display='none'" />
+                  <span class="nhdr__name">{t}</span>
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {chains.map(ch => (
+            <tr>
+              <th class="rowlabel rowlabel--line" scope="row">{ch.label}</th>
+              {TIERS.map(t => {
+                const members = ch.tiers[t];
+                return members.length > 0 ? (
+                  <td class="cell cell--tier">
+                    {members.map(b => (
+                      <div class="tier">
+                        <a class="tier__name" href={`#${b.slug}`}>
+                          {b.icon ? (
+                            <img class="tier__art" src={`${base}${b.icon}`} alt="" loading="lazy" onerror="this.style.display='none'" />
+                          ) : null}
+                          <span>{b.name}</span>
+                        </a>
+                        {b.effects && b.effects.length > 0 && (
+                          <div class="tier__chips">
+                            {b.effects.map(line => {
+                              const yk = classifyYield(line)?.toLowerCase() || 'misc';
+                              return <div class={`effect yield-${yk}`}><LinkedText text={line} iconsForYields={true} /></div>;
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="grid" id="ub-grid">
+    <div class="grid__scroll">
+      <table class="ntbl ntbl--ub">
+        <colgroup>
+          {cols.map(c => <col data-col={c.key} style={`width:${COL_W[c.key]}`} />)}
+        </colgroup>
+        <thead>
+          <tr>
+            {cols.map(c => (
+              <th class={`nhdr nhdr--col`} data-col={c.key}>
+                <div class="nhdr__inner"><span class="nhdr__name">{c.label}</span></div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {buildings.map(b => {
+            const prereqs = otherPrereq(b);
+            return (
+              <tr data-row={b.slug}>
+                {/* Improvement name + art */}
+                <th class="rowlabel rowlabel--item" scope="row" id={b.slug}>
+                  <div class="item__head">
+                    {b.icon ? (
+                      <img class="item__art" src={`${base}${b.icon}`} alt="" loading="lazy" onerror="this.style.display='none'" />
+                    ) : (
+                      <span class="item__art item__art--ph" aria-hidden="true"></span>
+                    )}
+                    <div class="item__txt">
+                      <div class="item__name">{b.name}</div>
+                      <div class="item__sub">{b.class}</div>
+                    </div>
+                  </div>
+                </th>
+
+                {/* Tech */}
+                {b.tech ? (
+                  <td class="cell cell--center yield-misc">
+                    <a class="tech-chip" href={`${base}technologies#${b.tech.slug}`} title={b.tech.name}>
+                      <img class="tech-chip__icon" src={`${base}img/icons/techs/${b.tech.slug}.png`} alt="" onerror="this.style.display='none'" />
+                      <span>{b.tech.name}</span>
+                    </a>
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Other prereqs — culture level shown as its emblem */}
+                {b.culturePrereq || prereqs.length > 0 ? (
+                  <td class="cell cell--list yield-misc">
+                    {b.culturePrereq && (
+                      <div class="listitem culture-req" title={`${b.culturePrereq} Culture`}>
+                        <img class="culture-ico" src={`${base}${cultureIcon[b.culturePrereq] || ''}`} alt={b.culturePrereq} onerror="this.style.display='none'" />
+                        <span>{b.culturePrereq}</span>
+                      </div>
+                    )}
+                    {prereqs.map(p => <div class="listitem"><LinkedText text={p} /></div>)}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Cost */}
+                {b.cost && b.cost.length > 0 ? (
+                  <td class="cell cell--effects">
+                    {b.cost.map(line => {
+                      const yk = classifyYield(line)?.toLowerCase() || 'misc';
+                      return <div class={`effect yield-${yk}`}><LinkedText text={line} iconsForYields={true} /></div>;
+                    })}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Build time (turns) */}
+                {b.buildTurns && b.buildTurns > 0 ? (
+                  <td class="cell cell--center yield-misc" data-sortval={b.buildTurns}>
+                    {b.buildTurns} {b.buildTurns === 1 ? 'turn' : 'turns'}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Upkeep (per-turn consumption) */}
+                {b.upkeep && b.upkeep.length > 0 ? (
+                  <td class="cell cell--effects">
+                    {b.upkeep.map(line => {
+                      const yk = classifyYield(line)?.toLowerCase() || 'misc';
+                      return <div class={`effect yield-${yk}`}><LinkedText text={line} iconsForYields={true} /></div>;
+                    })}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Specialist slot */}
+                {b.specialist ? (
+                  <td class="cell cell--center yield-misc">
+                    <a class="spec-chip" href={`${base}urban-specialists#${b.specialist.slug}`} title={b.specialist.name}>
+                      <img class="spec-chip__icon" src={`${base}img/icons/specialists/${b.specialist.slug}.png`} alt="" onerror="this.style.display='none'" />
+                      <span>{b.specialist.name}</span>
+                    </a>
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Effects */}
+                {b.effects && b.effects.length > 0 ? (
+                  <td class="cell cell--effects">
+                    {b.effects.map(line => {
+                      const yk = classifyYield(line)?.toLowerCase() || 'misc';
+                      return <div class={`effect yield-${yk}`}><LinkedText text={line} iconsForYields={true} /></div>;
+                    })}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Terrain */}
+                {b.terrains && b.terrains.length > 0 ? (
+                  <td class="cell yield-misc">
+                    {b.terrains.map(t => <div class="terrain-tag">{t}</div>)}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Restrictions */}
+                {b.restrictions && b.restrictions.length > 0 ? (
+                  <td class="cell yield-misc">
+                    {b.restrictions.map(r => <div class="listitem">{r}</div>)}
+                  </td>
+                ) : (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="application/json" id="ub-search-blobs" set:html={JSON.stringify(searchBlobs)}></script>
+  <script is:inline>
+    (function () {
+      const input = document.getElementById('site-search');
+      const blobNode = document.getElementById('ub-search-blobs');
+      const grid = document.getElementById('ub-grid');
+      if (!input || !blobNode || !grid) return;
+      let blobs;
+      try { blobs = JSON.parse(blobNode.textContent || '{}'); } catch { return; }
+      function apply() {
+        const q = (input.value || '').trim().toLowerCase();
+        for (const slug of Object.keys(blobs)) {
+          const row = grid.querySelector('tr[data-row="' + slug + '"]');
+          if (!row) continue;
+          const match = !q || blobs[slug].includes(q);
+          row.classList.toggle('is-hidden', !match);
+        }
+      }
+      input.addEventListener('input', apply);
+      apply();
+    })();
+  </script>
+  <script is:inline>
+    (function () {
+      const table = document.querySelector('#ub-grid table.ntbl');
+      if (!table || !table.tHead) return;
+      const ths = Array.from(table.tHead.rows[0].cells);
+      ths.forEach((th, ci) => {
+        th.classList.add('is-sortable');
+        th.addEventListener('click', () => {
+          const tb = table.tBodies[0];
+          const rows = Array.from(tb.rows).filter(r => !r.classList.contains('srow'));
+          const asc = th.getAttribute('aria-sort') !== 'ascending';
+          ths.forEach(h => h.removeAttribute('aria-sort'));
+          th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+          const val = r => {
+            const c = r.cells[ci];
+            const t = (c ? c.textContent : '').trim();
+            const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+            return { t, n: (t && !isNaN(n)) ? n : null };
+          };
+          rows.sort((a, b) => {
+            const ka = val(a), kb = val(b);
+            let r;
+            if (ka.n !== null && kb.n !== null) r = ka.n - kb.n;
+            else if (ka.n !== null) r = -1;
+            else if (kb.n !== null) r = 1;
+            else r = ka.t.localeCompare(kb.t);
+            return asc ? r : -r;
+          });
+          rows.forEach(r => tb.appendChild(r));
+        });
+      });
+    })();
+  </script>
+</Base>
+
+<style>
+  /* Sum of the colgroup widths — keeps columns at their set sizes and lets
+     .grid__scroll scroll horizontally on narrow screens instead of crushing. */
+  .ntbl--ub { min-width: 80rem; }
+  /* ── Building-line progression matrix ── */
+  .lines { margin-bottom: 1.6rem; }
+  .lines__title {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    margin: 0 0 0.15rem;
+  }
+  .lines__sub {
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    margin: 0 0 0.6rem;
+  }
+  .nhdr--line { min-width: 7rem; }
+  .nhdr__inner--culture { display: flex; align-items: center; gap: 0.35rem; }
+  .rowlabel--line {
+    text-align: left;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .cell--tier {
+    vertical-align: top;
+    padding: 0.4rem 0.55rem;
+    min-width: 11rem;
+  }
+  .tier + .tier { margin-top: 0.45rem; }
+  .tier__name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-display);
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .tier__name:hover span { text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 2px; }
+  .tier__art { width: 22px; height: 22px; object-fit: contain; flex: none; }
+  .tier__chips { margin-top: 0.2rem; }
+  .tier__chips .effect {
+    padding: 0.18rem 0.45rem;
+    margin: 0.12rem 0;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    line-height: 1.3;
+    background: var(--yield-bg, var(--bg-elev));
+    color: var(--yield-fg, var(--text));
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.2) 60%, rgba(0,0,0,0.32));
+    border: 1px solid color-mix(in srgb, var(--yield-bg, var(--border)) 50%, #000 50%);
+  }
+
+  /* Column headers — neutral (no per-nation colors here) */
+  .nhdr--col {
+    background: var(--bg-elev-2);
+    color: var(--text);
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    min-width: 8rem;
+  }
+  .nhdr--col .nhdr__name {
+    font-family: var(--font-display);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+  }
+
+  /* Item rowlabel — left sticky column. Art + Cinzel name + class subtitle. */
+  .rowlabel--item {
+    text-align: left;
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--bg-elev);
+    min-width: 12rem;
+    border-right: 1px solid var(--border);
+  }
+  .item__head { display: flex; align-items: center; gap: 0.5rem; }
+  .item__art {
+    width: 30px; height: 30px; object-fit: contain; flex: none;
+  }
+  .item__art--ph {
+    display: inline-block;
+    border-radius: 4px;
+    background: var(--bg-elev-2);
+  }
+  .item__txt { min-width: 0; }
+  .item__name {
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  .item__sub {
+    font-style: italic;
+    color: var(--text-faint);
+    font-size: 0.66rem;
+    margin-top: 0.1rem;
+  }
+
+  .cell--center { text-align: left; padding: 0.4rem 0.55rem; }
+
+  .tech-chip, .spec-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.5rem 0.15rem 0.3rem;
+    background: var(--bg-elev-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    text-decoration: none;
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+  .tech-chip:hover, .spec-chip:hover { filter: brightness(1.15); text-decoration: none; }
+  .tech-chip__icon, .spec-chip__icon {
+    width: 14px; height: 14px; object-fit: contain;
+  }
+
+  .terrain-tag {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    margin: 0.1rem 0.2rem 0.1rem 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    background: var(--bg);
+  }
+
+  .cell--list { padding: 0.3rem 0.5rem; }
+  .listitem {
+    font-size: 0.72rem;
+    padding: 0.06rem 0;
+  }
+  .culture-req { display: flex; align-items: center; gap: 0.3rem; }
+  .culture-ico { width: 16px; height: 16px; object-fit: contain; flex: none; }
+
+  /* Sortable column headers */
+  .nhdr.is-sortable { cursor: pointer; user-select: none; }
+  .nhdr.is-sortable:hover { filter: brightness(1.12); }
+  .nhdr.is-sortable .nhdr__name::after {
+    content: '⇅';
+    opacity: 0.35;
+    font-size: 0.85em;
+    margin-left: 0.3em;
+  }
+  .nhdr[aria-sort='ascending'] .nhdr__name::after { content: '↑'; opacity: 0.9; }
+  .nhdr[aria-sort='descending'] .nhdr__name::after { content: '↓'; opacity: 0.9; }
+</style>

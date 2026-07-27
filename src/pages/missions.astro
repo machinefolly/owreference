@@ -1,0 +1,475 @@
+---
+import Base from '../layouts/Base.astro';
+import LinkedText from '../components/LinkedText.astro';
+import catalog from '../data/mission-catalog.json';
+import detailMissions from '../data/missions.json';
+
+const base = import.meta.env.BASE_URL;
+
+// Missions with a dice-outcome detail page (missions.json) get their catalog
+// name linked. Folded internal variants (e.g. MISSION_SLANDER_ANY) point at
+// their base mission's page.
+const detailHref: Record<string, string> = {};
+// id → {href, outcomes, stories} so each row can advertise what the
+// detail page holds (dice outcomes + event stories) instead of hiding
+// it behind a subtly-linked name.
+const detailMeta: Record<string, { href: string; outcomes: number; stories: number }> = {};
+for (const dm of detailMissions) {
+  const href = `${base}${dm.path}`;
+  const stories = (dm.eventGroups || []).reduce((n: number, g: any) => n + g.events.length, 0);
+  const meta = { href, outcomes: (dm.outcomes || []).length, stories };
+  detailHref[dm.id] = href;
+  detailMeta[dm.id] = meta;
+  for (const fid of dm.foldedIds || []) { detailHref[fid] = href; detailMeta[fid] = meta; }
+}
+
+// Organized by WHO can run the mission. Order + blurbs mirror the
+// builder's PERFORMER_ORDER.
+const PERFORMER_ORDER = [
+  'Leader',
+  'Ambassador',
+  'Chancellor',
+  'Spymaster',
+  'Agent',
+  'Family Head',
+  'Religious Head & Clergy',
+  'Any Character',
+  'Situational',
+  'Unique Leader Powers',
+  'Other',
+];
+
+const PERFORMER_BLURB: Record<string, string> = {
+  'Leader': 'Run by the ruler — including the Diplomat / Judge / Scholar / Schemer leader archetypes and the Dictator.',
+  'Ambassador': 'Your council Ambassador — diplomacy, synods, trade missions.',
+  'Chancellor': 'Your council Chancellor.',
+  'Spymaster': 'Your council Spymaster — the espionage network.',
+  'Agent': 'Spy-network Agents operating in the field.',
+  'Family Head': 'The head of a family (matters most under Oligarchy).',
+  'Religious Head & Clergy': 'The religion head or its clergy, by faith.',
+  'Any Character': 'Any eligible courtier — non-leaders, tutors, envoys, marriageable characters.',
+  'Situational': 'Characters in a particular state — imprisoned, captured, fugitive, bastard, infected.',
+  'Unique Leader Powers': 'Scripted abilities tied to specific named leaders / dynasties (DLC).',
+  'Other': 'Diplomacy plumbing with no single character actor.',
+};
+
+type Mission = typeof catalog[number];
+
+const grouped = PERFORMER_ORDER
+  .map(p => {
+    const all = catalog.filter(m => m.performer === p);
+    return {
+      p,
+      blurb: PERFORMER_BLURB[p],
+      player: all.filter(m => !m.internal),
+      internal: all.filter(m => m.internal),
+    };
+  })
+  .filter(g => g.player.length + g.internal.length > 0);
+
+const totalPlayer = catalog.filter(m => !m.internal).length;
+const totalInternal = catalog.length - totalPlayer;
+
+const searchBlobs: Record<string, string> = {};
+for (const m of catalog) {
+  searchBlobs[m.id] = JSON.stringify({
+    n: m.name, w: m.who, p: m.performer, t: m.target,
+    d: m.dlc, tech: m.techPrereq?.label, role: m.roleReq?.label, o: m.outcomes,
+  }).toLowerCase();
+}
+---
+
+<Base
+  title="Missions"
+  active="missions"
+  pageMark="📜"
+  description="Every mission in Old World, organized by who can perform it — Leader, Ambassador, Chancellor, Spymaster, Agent, Family Head, clergy and more. With costs, time, requirements and outcomes, pulled XML-canonical from the game's files."
+  pageStats={[
+    { label: 'missions', value: totalPlayer },
+    { label: 'performer roles', value: grouped.length },
+    { label: 'internal variants', value: totalInternal },
+  ]}
+>
+  <div class="mtoolbar">
+    <label class="mtoolbar__chk">
+      <input type="checkbox" id="show-internal" />
+      <span>Show internal / AI variants ({totalInternal})</span>
+    </label>
+    <div class="mcostfilter" id="m-costfilter">
+      <span class="mcf__label">Filter by cost</span>
+      {[['civics','Civics'],['training','Training'],['money','Money'],['orders','Orders']].map(([y, lbl]) => (
+        <button type="button" class="mcf" data-yield={y}>
+          <img class="mcf__ic" src={`${base}img/icons/yields/${y}.png`} alt="" onerror="this.remove()" />{lbl}
+        </button>
+      ))}
+    </div>
+    <span class="mtoolbar__note" id="m-searchnote" hidden></span>
+  </div>
+
+  <div id="missions-root">
+    {grouped.map(group => (
+      <section class="mcat" data-cat={group.p}>
+        <header class="mcat__head">
+          <h2 class="mcat__title">{group.p}</h2>
+          <span class="mcat__count">{group.player.length}</span>
+          <p class="mcat__blurb">{group.blurb}</p>
+        </header>
+
+        <table class="mtbl">
+          <thead>
+            <tr>
+              <th class="mtbl__c-name">Mission</th>
+              <th class="mtbl__c-who">Who / role</th>
+              <th class="mtbl__c-cost">Cost</th>
+              <th class="mtbl__c-time">Time</th>
+              <th class="mtbl__c-req">Requires</th>
+              <th class="mtbl__c-out">Outcomes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...group.player, ...group.internal].map(m => (
+              <tr
+                class={`mrow ${m.internal ? 'mrow--internal' : ''}`}
+                data-mission={m.id}
+                data-internal={m.internal ? '1' : '0'}
+                data-cost={[...new Set([...m.cost, ...m.opinionCost].map(c => c.yield))].join(' ')}
+              >
+                <td class="mtbl__c-name">
+                  {detailHref[m.id] ? (
+                    <a class="mname mname--link" href={detailHref[m.id]}>{m.name}</a>
+                  ) : (
+                    <span class="mname">{m.name}</span>
+                  )}
+                  {detailMeta[m.id] && (
+                    <a
+                      class="mdetail"
+                      href={detailMeta[m.id].stories ? `${detailMeta[m.id].href}#events` : detailMeta[m.id].href}
+                      title="Dice odds, scaled rewards, and every event story this mission can fire"
+                    >
+                      {detailMeta[m.id].outcomes} outcomes{detailMeta[m.id].stories ? ` · ${detailMeta[m.id].stories} events` : ''} →
+                    </a>
+                  )}
+                  {m.target && <span class="mtarget">→ {m.target}</span>}
+                  {m.description && (
+                    <span class="mdesc"><LinkedText text={m.description} showIcons={false} /></span>
+                  )}
+                </td>
+                <td class="mtbl__c-who">
+                  {m.who && m.who !== '—'
+                    ? <span class="mwho">{m.who}</span>
+                    : <span class="cell__dash">—</span>}
+                  {m.roleReq && m.roleReq.kind === 'archetype' && (
+                    <span class="mrole" title={`Requires the ${m.roleReq.label} archetype`}>
+                      {m.roleReq.icon && (
+                        <img class="mrole__ic" src={`${base}img/${m.roleReq.icon}.png`} alt="" onerror="this.remove()" />
+                      )}
+                      <LinkedText text={m.roleReq.label} showIcons={false} />
+                    </span>
+                  )}
+                </td>
+                <td class="mtbl__c-cost">
+                  {m.cost.length === 0 && m.opinionCost.length === 0 ? (
+                    <span class="cell__dash">—</span>
+                  ) : (
+                    <span class="mcost">
+                      {m.cost.map(c => (
+                        <span class="ycost" title={`${c.value} ${c.label}`}>
+                          <b>{c.value}</b>
+                          <img class="ycost__ic" src={`${base}img/icons/yields/${c.yield}.png`} alt={c.label} onerror="this.replaceWith(document.createTextNode(' ' + this.alt))" />
+                        </span>
+                      ))}
+                      {m.opinionCost.map(c => (
+                        <span class="ycost ycost--op" title={`${c.value} ${c.label} (opinion / treasury)`}>
+                          <b>{c.value}</b>
+                          <img class="ycost__ic" src={`${base}img/icons/yields/${c.yield}.png`} alt={c.label} onerror="this.replaceWith(document.createTextNode(' ' + this.alt))" />
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </td>
+                <td class="mtbl__c-time">
+                  {m.turns > 0
+                    ? <span>{m.turns}{m.turnsScaled ? '+' : ''} <span class="munit">turn{m.turns === 1 ? '' : 's'}</span></span>
+                    : <span class="munit">instant</span>}
+                  {m.cooldown > 0 && <span class="mcd">{m.cooldown}t cooldown</span>}
+                </td>
+                <td class="mtbl__c-req">
+                  {!m.techPrereq && !m.dlc && !m.diplomacy && !m.gameOption ? (
+                    <span class="cell__dash">—</span>
+                  ) : (
+                    <span class="mreq">
+                      {m.techPrereq && (
+                        <a class="chip chip--tech" href={`${base}technologies#${m.techPrereq.slug}`}>{m.techPrereq.label}</a>
+                      )}
+                      {m.diplomacy && <span class="chip chip--diplo">{m.diplomacy}</span>}
+                      {m.gameOption && <span class="chip chip--opt">{m.gameOption}</span>}
+                      {m.dlc && <span class="chip chip--dlc">{m.dlc}</span>}
+                    </span>
+                  )}
+                </td>
+                <td class="mtbl__c-out">
+                  {m.outcomes.length === 0 ? (
+                    <span class="cell__dash">—</span>
+                  ) : m.outcomes.length === 1 ? (
+                    <span class="mout-single">{m.outcomes[0]}</span>
+                  ) : (
+                    <details class="mout">
+                      <summary>{m.outcomeCount} outcomes</summary>
+                      <ul class="mout__list">
+                        {m.outcomes.map(o => <li>{o}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    ))}
+  </div>
+
+  <script type="application/json" id="m-search-blobs" set:html={JSON.stringify(searchBlobs)}></script>
+  <script is:inline>
+    (function () {
+      const root = document.getElementById('missions-root');
+      const blobNode = document.getElementById('m-search-blobs');
+      const input = document.getElementById('site-search');
+      const showInternal = document.getElementById('show-internal');
+      const note = document.getElementById('m-searchnote');
+      const costFilter = document.getElementById('m-costfilter');
+      if (!root || !blobNode) return;
+      let blobs;
+      try { blobs = JSON.parse(blobNode.textContent || '{}'); } catch { return; }
+
+      const costBtns = costFilter ? [...costFilter.querySelectorAll('.mcf')] : [];
+
+      function apply() {
+        const q = ((input && input.value) || '').trim().toLowerCase();
+        const wantInternal = !!(showInternal && showInternal.checked);
+        const wantCosts = costBtns.filter(b => b.classList.contains('is-on')).map(b => b.getAttribute('data-yield'));
+        let shown = 0;
+        for (const row of root.querySelectorAll('.mrow')) {
+          const id = row.getAttribute('data-mission');
+          const isInternal = row.getAttribute('data-internal') === '1';
+          const costs = (row.getAttribute('data-cost') || '').split(' ');
+          const matchesQ = !q || (blobs[id] || '').includes(q);
+          const matchesCost = !wantCosts.length || wantCosts.some(y => costs.indexOf(y) !== -1);
+          const visible = matchesQ && matchesCost && (wantInternal || !isInternal);
+          row.classList.toggle('is-hidden', !visible);
+          if (visible) shown++;
+        }
+        for (const sec of root.querySelectorAll('.mcat')) {
+          sec.classList.toggle('is-hidden', !sec.querySelector('.mrow:not(.is-hidden)'));
+        }
+        if (note) {
+          if (q || wantCosts.length) {
+            note.hidden = false;
+            const bits = [];
+            if (q) bits.push('"' + (input ? input.value : '') + '"');
+            if (wantCosts.length) bits.push('cost: ' + wantCosts.join(' / '));
+            note.textContent = shown + ' mission' + (shown === 1 ? '' : 's') + ' · ' + bits.join(' · ');
+          } else { note.hidden = true; }
+        }
+      }
+
+      if (input) input.addEventListener('input', apply);
+      if (showInternal) showInternal.addEventListener('change', apply);
+      for (const b of costBtns) b.addEventListener('click', () => { b.classList.toggle('is-on'); apply(); });
+      apply();
+    })();
+  </script>
+</Base>
+
+<style>
+  .mtoolbar {
+    display: flex; align-items: center; gap: 1rem;
+    margin: 0.25rem 0 1.25rem; flex-wrap: wrap;
+  }
+  .mtoolbar__chk {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    font-size: 0.8rem; color: var(--text-soft);
+    cursor: pointer; user-select: none;
+  }
+  .mtoolbar__chk input { accent-color: var(--gold); }
+  .mtoolbar__note {
+    font-family: var(--font-ui);
+    font-size: 0.7rem; letter-spacing: 0.06em; color: var(--gold-soft);
+  }
+
+  .mcostfilter {
+    display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.35rem;
+  }
+  .mcf__label {
+    font-family: var(--font-ui);
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-dim); margin-right: 0.1rem;
+  }
+  .mcf {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    font-family: var(--font-ui); font-size: 0.74rem;
+    color: var(--text-soft); cursor: pointer; user-select: none;
+    background: var(--surface, transparent); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0.18rem 0.55rem 0.18rem 0.4rem;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+  .mcf:hover { border-color: var(--gold-deep); }
+  .mcf.is-on { border-color: var(--gold); color: var(--text); background: oklch(0.30 0.04 80 / 0.28); }
+  .mcf__ic { width: 0.95rem; height: 0.95rem; object-fit: contain; }
+
+  .mcat { margin-bottom: 2.25rem; }
+  .mcat.is-hidden { display: none; }
+  .mcat__head {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    align-items: baseline; gap: 0.6rem;
+    padding-bottom: 0.4rem; margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--gold-deep);
+  }
+  .mcat__title {
+    font-family: var(--font-display);
+    font-weight: 600; font-size: 1.5rem; color: var(--text);
+  }
+  .mcat__count {
+    font-family: var(--font-mono); font-size: 0.72rem;
+    color: var(--gold-soft);
+    border: 1px solid var(--gold-deep); border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+  }
+  .mcat__blurb {
+    font-family: var(--font-display); font-style: italic;
+    font-size: 0.92rem; color: var(--text-faint);
+    margin: 0; justify-self: end; text-align: right;
+  }
+
+  .mtbl {
+    width: 100%; border-collapse: collapse;
+    font-size: 0.85rem; line-height: 1.3;
+  }
+  .mtbl thead th {
+    font-family: var(--font-ui);
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--text-dim); font-weight: 500; text-align: left;
+    padding: 0.3rem 0.7rem; border-bottom: 1px solid var(--border);
+  }
+  .mtbl td {
+    padding: 0.42rem 0.7rem; vertical-align: top;
+    border-bottom: 1px solid var(--border-faint);
+  }
+  .mtbl__c-name { width: 25%; }
+  .mtbl__c-who  { width: 17%; }
+  .mtbl__c-cost { width: 13%; }
+  .mtbl__c-time { width: 11%; }
+  .mtbl__c-req  { width: 17%; }
+  .mtbl__c-out  { width: 17%; }
+
+  .mrow.is-hidden { display: none; }
+  .mrow:hover td { background: oklch(0.30 0.04 80 / 0.28); }
+  .mrow--internal td { opacity: 0.62; }
+  .mrow--internal .mname { font-style: italic; }
+
+  .mname {
+    display: block;
+    font-family: var(--font-display);
+    font-weight: 600; font-size: 0.98rem; color: var(--text);
+  }
+  .mname--link { text-decoration: none; }
+  .mname--link:hover { color: var(--gold, var(--accent)); text-decoration: underline; }
+  .mdetail {
+    display: inline-block;
+    margin-left: 0.45rem;
+    padding: 0.04rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    color: var(--gold-soft, var(--accent));
+    border: 1px solid color-mix(in srgb, var(--gold, var(--accent)) 40%, var(--border));
+    border-radius: 4px;
+    text-decoration: none;
+    white-space: nowrap;
+    vertical-align: 0.1em;
+  }
+  .mdetail:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--gold, var(--accent)) 18%, var(--bg-elev));
+    text-decoration: none;
+  }
+  .mtarget { display: block; font-size: 0.72rem; color: var(--text-faint); }
+  .mdesc {
+    display: block; margin-top: 0.15rem;
+    font-size: 0.78rem; color: var(--text-soft); line-height: 1.35;
+  }
+  .mwho { display: block; color: var(--text); }
+  .mrole {
+    display: inline-flex; align-items: center; gap: 0.28rem;
+    margin-top: 0.2rem;
+    font-size: 0.72rem; color: var(--gold-soft);
+    font-family: var(--font-mono);
+  }
+  .mrole__ic {
+    width: 15px; height: 15px; object-fit: contain;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+  }
+
+  .mcost { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; }
+  .ycost {
+    display: inline-flex; align-items: center; gap: 0.12rem;
+    font-size: 0.84rem; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .ycost b { font-weight: 600; }
+  .ycost__ic {
+    width: 16px; height: 16px; object-fit: contain;
+    vertical-align: -0.18em;
+  }
+  .ycost--op { opacity: 0.7; }
+  .ycost--op::before {
+    content: '~'; color: var(--text-faint); margin-right: 0.05rem;
+  }
+
+  .mreq { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+  .chip {
+    display: inline-flex; align-items: center;
+    font-family: var(--font-mono); font-size: 0.68rem;
+    padding: 0.08rem 0.4rem; border-radius: 3px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-soft); white-space: nowrap;
+  }
+  .chip--tech {
+    border-color: oklch(0.5 0.1 270); color: oklch(0.78 0.09 270);
+    text-decoration: none;
+  }
+  .chip--tech:hover { background: oklch(0.5 0.1 270 / 0.18); text-decoration: none; }
+  .chip--diplo { border-color: oklch(0.5 0.08 145); color: oklch(0.78 0.08 145); }
+  .chip--opt   { border-color: var(--border-strong); color: var(--text-faint); }
+  .chip--dlc   { border-color: oklch(0.5 0.1 60); color: oklch(0.8 0.1 60); }
+
+  .munit { color: var(--text-faint); font-size: 0.78rem; }
+  .mcd {
+    display: block; font-size: 0.68rem; color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+
+  .mout-single { color: var(--text-soft); font-size: 0.8rem; }
+  .mout summary {
+    cursor: pointer; color: var(--gold-soft);
+    font-size: 0.78rem; font-family: var(--font-mono);
+  }
+  .mout summary:hover { color: var(--gold); }
+  .mout__list {
+    margin: 0.3rem 0 0; padding-left: 1rem;
+    color: var(--text-soft); font-size: 0.78rem; line-height: 1.45;
+  }
+
+  .cell__dash { opacity: 0.3; font-family: var(--font-mono); }
+
+  @media (max-width: 860px) {
+    .mtbl, .mtbl thead, .mtbl tbody, .mtbl tr, .mtbl td { display: block; }
+    .mtbl thead { display: none; }
+    .mrow { border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.6rem; }
+    .mtbl td { border: 0; padding: 0.2rem 0.8rem; }
+    .mtbl__c-name { padding-top: 0.5rem; }
+    .mtbl__c-out  { padding-bottom: 0.5rem; }
+    .mcat__blurb { display: none; }
+    .mcat__head { grid-template-columns: auto auto; }
+  }
+</style>

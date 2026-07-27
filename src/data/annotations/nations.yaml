@@ -1,0 +1,34 @@
+# Curation layer for nations — DECLINING. Everything derivable from the
+# game XML has been migrated into scripts/build_data.py:
+#   shrines     → derived from improvement.xml (yield output + adjacency)
+#   uniqueUnit  → derived from unit.xml (upgrade chain, cost, upkeep,
+#                 move/range/effective vision, traits, culture tiers)
+#   leader      → derived from nation.xml DefaultDynasty → dynasty.xml
+#                 FirstRuler → character.xml (spouse links, living members)
+#   u6Card/u8Card → dropped (every nation rolls Strong/Legendary Culture;
+#                 the rows were removed from the page long ago)
+#
+# What remains: `bonuses` for the four nations whose kit is NOT fully on
+# their EFFECTPLAYER_NATION_* tree — parts live on NationPrereq'd content
+# (Aksum Stele, Kushite Pyramids, Tamil Sangam/Elephant/Harbor bonuses,
+# Yuezhi Steppe Riders / Vassalize Tribe). The pages fall back to these
+# only while the XML rendering has fewer lines than the yaml (see
+# bonusSource() in src/pages/nations.astro). Delete each entry once the
+# humanizer covers the nation's full kit.
+
+nations:
+  aksum:
+    bonuses:
+    - Mint Coin (+money +legitimacy)
+    - Elephants add Ivory (with camp)
+    - Stele (civic and yield boost)
+  kush:
+    bonuses:
+    - anyone can build Forts
+    - +50% Shrines
+    - Kushite Pyramids
+  yuezhi:
+    bonuses:
+    - 1 Horse in each city
+    - Steppe Riders
+    - Vassalize Tribe / +Ally Fatigue

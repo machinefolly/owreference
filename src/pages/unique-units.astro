@@ -1,0 +1,633 @@
+---
+import Base from '../layouts/Base.astro';
+import allUnits from '../data/units.json';
+
+const base = import.meta.env.BASE_URL;
+
+// Nation-unique units only — each is gated behind a NationPrereq and unlocked
+// at a Culture tier (Developing / Strong), not a tech. Yuezhi's Steppe Rider
+// and Aksum's Dmt Warrior unlock from the start ("Initial"). Classification
+// comes from units.json's `category` field (build_unit_damage.py).
+const units = (allUnits as any[])
+  .filter(u => u.category === 'unique')
+  .sort((a, b) =>
+    a.nationLabel.localeCompare(b.nationLabel) || a.eraOrder - b.eraOrder || a.name.localeCompare(b.name));
+
+const unitArt = (slug: string) => `${base}img/icons/units/${slug}.png`;
+const traitIcon = (key: string) => `${base}img/icons/unit_traits/${key}.png`;
+const yieldIcon = (key: string) => `${base}img/icons/yields/${key}.png`;
+const crest = (nation: string) => `${base}img/crests/${nation.toLowerCase()}.png`;
+const eraIcon = (era: string) => `${base}img/icons/culture/${era.toLowerCase()}.png`;
+
+function unitClass(u: any): { key: string; label: string; icon: string } {
+  return {
+    key: (u.primaryLabel || 'other').toLowerCase(),
+    label: u.primaryLabel || 'Other',
+    icon: (u.primaryTrait || '').replace('UNITTRAIT_', '').toLowerCase(),
+  };
+}
+
+// Traits we never surface as chips: the combat classes (already shown in the
+// Class column) plus the mount sub-type traits (HORSE/CAMEL/ELEPHANT/CHARIOT).
+// Those last are internal combat categorisation — the game uses them for
+// counter math, not as player-facing labels — and they're redundant with the
+// Class column and the unit's own name. Genuine special abilities come from
+// EffectUnits (the `abilities` list), not from these traits.
+const HIDE_TRAITS = new Set([
+  'UNITTRAIT_PROMOTABLE', 'UNITTRAIT_MELEE', 'UNITTRAIT_INFANTRY', 'UNITTRAIT_POLEARM',
+  'UNITTRAIT_MOUNTED', 'UNITTRAIT_RANGED', 'UNITTRAIT_SIEGE', 'UNITTRAIT_SHIP',
+  'UNITTRAIT_TRIBAL', 'UNITTRAIT_DISCIPLE', 'UNITTRAIT_WORKER',
+  'UNITTRAIT_HORSE', 'UNITTRAIT_CAMEL', 'UNITTRAIT_ELEPHANT', 'UNITTRAIT_CHARIOT',
+]);
+const secondaryTraits = (u: any) =>
+  (u.traitIds as string[])
+    .filter(t => t !== u.primaryTrait && !HIDE_TRAITS.has(t))
+    .map(t => t.replace('UNITTRAIT_', '').replace(/_/g, ' ').toLowerCase()
+      .replace(/\b\w/g, c => c.toUpperCase()));
+
+// "Unlock" mixes Culture tiers (most uniques) with building gates: a unit
+// with no CulturePrereq but an ImprovementPrereq (Aksum's D'mt Warrior) reads
+// as "Stronghold", not "From start".
+const CULTURE_TIERS = new Set(['Weak', 'Developing', 'Strong', 'Legendary']);
+const tierLabel = (t: string) => t === 'Initial' ? 'From start' : CULTURE_TIERS.has(t) ? `${t} Culture` : t;
+const tierIcon = (t: string): string | undefined => CULTURE_TIERS.has(t) ? eraIcon(t) : undefined;
+
+// ── Fold each base unit with its upgrade chain into one "nation line" ──
+// Unique units come in base→upgrade pairs (Developing→Strong, e.g. D'mt
+// Warrior → Shotelai); only Yuezhi's Steppe Rider stands alone. We render one
+// row per line, folding differing base/upgrade values with slash notation
+// (150/200 iron) and showing shared values once (2 Move, Melee Infantry Disarm).
+const byId = new Map((units as any[]).map(u => [u.id, u]));
+const upgradeTargets = new Set<string>();
+for (const u of units) for (const t of (u.upgradeTo as string[])) if (byId.has(t)) upgradeTargets.add(t);
+
+type Line = { key: string; chain: any[]; base: any };
+const lines: Line[] = [];
+for (const u of units) {
+  if (upgradeTargets.has(u.id)) continue;             // start only from base units
+  const chain = [u];
+  let cur = u;
+  for (let guard = 0; guard < 4; guard++) {
+    const nxt = (cur.upgradeTo as string[]).map(t => byId.get(t)).find(Boolean);
+    if (!nxt) break;
+    chain.push(nxt); cur = nxt;
+  }
+  lines.push({ key: u.slug, chain, base: u });
+}
+lines.sort((a, b) =>
+  a.base.nationLabel.localeCompare(b.base.nationLabel) || a.base.eraOrder - b.base.eraOrder);
+
+// Collapse consecutive equal values, then slash-join: [60,80]→"60 / 80", [2,2]→"2".
+const collapse = (vals: any[]) => {
+  const out: any[] = [];
+  for (const v of vals) if (!out.length || out[out.length - 1] !== v) out.push(v);
+  return out;
+};
+const foldNums = (vals: (number | string)[], sep = ' / ') => collapse(vals).join(sep);
+
+// Fold a yield list (resource costs / per-turn upkeep) across the chain: union
+// the yield keys (base order first), then slash-fold each key's values.
+function foldYields(chain: any[], field: 'costs' | 'consumption') {
+  const keys: string[] = [];
+  for (const u of chain) for (const c of u[field]) if (!keys.includes(c.yield)) keys.push(c.yield);
+  return keys.map(k => ({
+    yield: k,
+    text: foldNums(chain.map(u => { const c = u[field].find((x: any) => x.yield === k); return c ? c.value : 0; }), '/'),
+  }));
+}
+
+// Training cost — the unit's `production` value, paid in `trainingYield` (Training
+// for almost everyone; Growth for Yuezhi's Steppe Rider). This is the primary
+// build cost; `costs` only holds the extra resource costs (iron/wood/food) on top.
+// Folded across the chain (base / upgrade) and grouped by training yield.
+function foldTraining(chain: any[]) {
+  const keys: string[] = [];
+  for (const u of chain) { const k = u.trainingYield || 'training'; if (!keys.includes(k)) keys.push(k); }
+  return keys.map(k => ({
+    yield: k,
+    text: foldNums(chain.map(u => (u.trainingYield || 'training') === k ? u.production : 0), '/'),
+  }));
+}
+const lineTraits = (chain: any[]) => [...new Set(chain.flatMap(u => secondaryTraits(u)))];
+function lineAbilities(chain: any[]) {
+  const seen = new Set<string>(); const out: any[] = [];
+  for (const u of chain) for (const a of u.abilities) if (!seen.has(a.label)) { seen.add(a.label); out.push(a); }
+  return out;
+}
+
+const searchBlobs: Record<string, string> = {};
+for (const l of lines) searchBlobs[l.key] = JSON.stringify(l.chain).toLowerCase();
+
+// ── Faceted-filter option lists (over nation lines, not raw units) ──
+const NATIONS = [...new Set(lines.map(l => l.base.nationLabel))].sort();
+const CLASS_ORDER = ['Infantry', 'Polearm', 'Mounted', 'Ranged', 'Siege', 'Ship'];
+const presentClasses = CLASS_ORDER.filter(c => lines.some(l => unitClass(l.base).label === c));
+
+const cnt = (pred: (l: Line) => boolean) => lines.filter(pred).length;
+type Facet = { key: string; title: string; opts: { val: string; label: string; icon?: string; count: number }[] };
+const FACETS: Facet[] = [
+  { key: 'nation', title: 'Nation', opts: NATIONS.map(n => ({
+      val: n, label: n, icon: crest(n), count: cnt(l => l.base.nationLabel === n) })) },
+  { key: 'class', title: 'Class', opts: presentClasses.map(c => ({
+      val: c, label: c, icon: traitIcon(unitClass(lines.find(l => unitClass(l.base).label === c)!.base).icon),
+      count: cnt(l => unitClass(l.base).label === c) })) },
+];
+---
+
+<Base
+  title="Unique Units"
+  active="unique-units"
+  pageMark="⭐"
+  description={`The ${units.length} nation-unique units of Old World — across ${NATIONS.length} civilizations — paired into ${lines.length} base→upgrade lines (e.g. D'mt Warrior → Shotelai). Each unlocks at a Culture tier (Developing or Strong) or a city building (Stronghold / Citadel) rather than a tech, and only that nation can build it. Differing base/upgrade values are folded with a slash (150/200 iron); shared ones shown once. Columns cover unlock, class, Strength, Move, Range, resource cost, upkeep and special abilities (Disarm, Testudo, Rout…) — all derived from the game's unit.xml.`}
+>
+  <div class="page-meta">
+    <h1 class="page-title">Unique Units</h1>
+    <div class="page-stats">
+      <button
+        type="button"
+        class="stat stat--button"
+        id="unit-picker-toggle"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="unit-picker"
+      >
+        <b id="unit-visible-count">{lines.length}</b> of <b>{lines.length}</b> visible <span class="stat__chev">▾</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="nation-picker nation-picker--facets" id="unit-picker" hidden role="dialog" aria-label="Filter unique units">
+    <div class="nation-picker__actions">
+      <button type="button" class="nation-picker__action" data-pick="all">Select all</button>
+      <button type="button" class="nation-picker__action" data-pick="none">Clear</button>
+      <button type="button" class="nation-picker__action nation-picker__action--close" data-pick="close">Done</button>
+    </div>
+    {FACETS.map(f => (
+      <div class="facet">
+        <div class="facet__title">{f.title}</div>
+        <ul class="nation-picker__list">
+          {f.opts.map(o => (
+            <li class="nation-picker__item">
+              <label class={`nation-picker__row${f.key === 'nation' ? ` n-${o.val.toLowerCase()}` : ''}`}>
+                <input type="checkbox" class="nation-picker__cb" data-facet={f.key} value={o.val} checked />
+                {o.icon && <img class="nation-picker__crest" src={o.icon} alt="" onerror="this.style.display='none'" />}
+                <span class="nation-picker__name">{o.label}</span>
+                <span class="nation-picker__count">{o.count}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </div>
+
+  <div class="grid__searchnote" id="grid-searchnote" hidden></div>
+
+  <div class="grid" id="units-grid">
+    <div class="grid__scroll">
+      <table class="ntbl utbl">
+        <colgroup>
+          <col class="utbl__name-col" />
+          <col class="utbl__nation-col" />
+          <col class="utbl__tier-col" />
+          <col class="utbl__class-col" />
+          <col class="utbl__stat-col" />
+          <col class="utbl__stat-col" />
+          <col class="utbl__stat-col" />
+          <col class="utbl__cost-col" />
+          <col class="utbl__mat-col" />
+          <col class="utbl__abil-col" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rowlabel rowlabel--corner" title="Base → upgrade unit line"><span class="nhdr__name">Unit line</span></th>
+            <th class="nhdr nhdr--col"><span class="nhdr__name">Nation</span></th>
+            <th class="nhdr nhdr--col" title="Culture tier or building that unlocks each unit"><span class="nhdr__name">Unlock</span></th>
+            <th class="nhdr nhdr--col"><span class="nhdr__name">Class</span></th>
+            <th class="nhdr nhdr--col nhdr--num" title="Strength (base / upgrade)"><span class="nhdr__name">Str</span></th>
+            <th class="nhdr nhdr--col nhdr--num" title="Movement · Sight"><span class="nhdr__name">Move·Sight</span></th>
+            <th class="nhdr nhdr--col nhdr--num" title="Attack range (melee shows —)"><span class="nhdr__name">Range</span></th>
+            <th class="nhdr nhdr--col" title="Training + resource cost to build (base / upgrade)"><span class="nhdr__name">Cost</span></th>
+            <th class="nhdr nhdr--col" title="Per-turn upkeep (base / upgrade)"><span class="nhdr__name">Upkeep</span></th>
+            <th class="nhdr nhdr--col"><span class="nhdr__name">Traits & Abilities</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map(l => {
+            const chain = l.chain;
+            const bu = l.base;
+            const cls = unitClass(bu);
+            const sec = lineTraits(chain);
+            const ab = lineAbilities(chain);
+            const buildCost = [...foldTraining(chain), ...foldYields(chain, 'costs')];
+            const upkeep = foldYields(chain, 'consumption');
+            const eras = collapse(chain.map(u => u.era));
+            const unlockTitle = eras.map((e: string) => e === 'Initial' ? 'from start' : tierLabel(e)).join(' → ');
+            const strFold = foldNums(chain.map(u => u.strength / 10));
+            const moveFold = foldNums(chain.map(u => u.movement));
+            const sightFold = foldNums(chain.map(u => u.vision));
+            const ranged = chain.some(u => u.rangeMax > 0);
+            const rangeFold = foldNums(chain.map(u => u.rangeMax || 0));
+            return (
+              <tr data-line={l.key} data-nation={bu.nationLabel} data-class={cls.label} id={l.key}>
+                <th class="rowlabel rowlabel--unit" scope="row" data-sortval={bu.name}>
+                  <div class="uname">
+                    <div class="uname__arts">
+                      {chain.map((u: any) => (
+                        <img class="uname__art uname__art--sm" src={unitArt(u.iconSlug)} alt="" loading="lazy" title={u.name} onerror="this.style.display='none'" />
+                      ))}
+                    </div>
+                    <div class="uname__text">
+                      <span class="uname__name">
+                        {chain.map((u: any, i: number) => (
+                          <span class="uname__line">{u.name}{i < chain.length - 1 ? ' →' : ''}</span>
+                        ))}
+                      </span>
+                      {bu.source !== 'Base game' && (
+                        <div class="uname__meta">
+                          <span class="chip chip--dlc" title={`${bu.source} DLC`}>DLC</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </th>
+
+                {/* Owning nation — crest + name, links to the nation page */}
+                <td class={`cell cell--nation n-${bu.nationLabel.toLowerCase()}`} data-sortval={bu.nationLabel}>
+                  <a class="nat-tag" href={`${base}nations/${bu.nationLabel.toLowerCase()}`} title={bu.nationLabel}>
+                    <img class="nat-tag__crest" src={crest(bu.nationLabel)} alt="" onerror="this.style.display='none'" />
+                    <span class="nat-tag__txt">{bu.nationLabel}</span>
+                  </a>
+                </td>
+
+                {/* Unlock — folded Culture tier / building gate per step */}
+                <td class="cell cell--tier" data-sortval={bu.eraOrder}>
+                  <span class="era-tag" title={unlockTitle}>
+                    {tierIcon(eras[0]) && (
+                      <img class="era-tag__ico" src={tierIcon(eras[0])} alt="" onerror="this.style.display='none'" />
+                    )}
+                    <span class="era-tag__txt">{eras.map((e: string) => e === 'Initial' ? 'From start' : e).join(' → ')}</span>
+                  </span>
+                </td>
+
+                {/* Class */}
+                <td class="cell cell--class" data-sortval={cls.label}>
+                  <span class="cls-tag" title={cls.label}>
+                    <img class="cls-tag__ico" src={traitIcon(cls.icon)} alt="" onerror="this.style.display='none'" />
+                    <span class="cls-tag__txt">{cls.label}</span>
+                  </span>
+                </td>
+
+                {/* Strength (base / upgrade) */}
+                <td class="cell cell--num" data-sortval={bu.strength}>
+                  <span class="numval numval--str">{strFold}</span>
+                </td>
+
+                {/* Movement · Sight */}
+                <td class="cell cell--num" data-sortval={bu.movement}>
+                  <span class="numval" title={`${moveFold} Move · ${sightFold} Sight`}>{moveFold}<span class="numval__dim"> · {sightFold}</span></span>
+                </td>
+
+                {/* Range */}
+                {ranged ? (
+                  <td class="cell cell--num" data-sortval={bu.rangeMax}>
+                    <span class="numval">{rangeFold}</span>
+                  </td>
+                ) : (
+                  <td class="cell cell--num is-empty" data-sortval={0}><span class="cell__dash">—</span></td>
+                )}
+
+                {/* Training + resource cost to build (base / upgrade) */}
+                {buildCost.length === 0 ? (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                ) : (
+                  <td class="cell cell--chips">
+                    {buildCost.map((c: any) => (
+                      <span class={`chip yield-${c.yield}`} title={`${c.text} ${c.yield} to build`}>
+                        <img class="chip__icon" src={yieldIcon(c.yield)} alt="" onerror="this.style.display='none'" />
+                        {c.text}
+                      </span>
+                    ))}
+                  </td>
+                )}
+
+                {/* Upkeep (base / upgrade) */}
+                {upkeep.length === 0 ? (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                ) : (
+                  <td class="cell cell--chips">
+                    {upkeep.map((c: any) => (
+                      <span class={`chip yield-${c.yield}`} title={`${c.text} ${c.yield} per turn upkeep`}>
+                        <img class="chip__icon" src={yieldIcon(c.yield)} alt="" onerror="this.style.display='none'" />
+                        {c.text}
+                      </span>
+                    ))}
+                  </td>
+                )}
+
+                {/* Traits & abilities (union across the line). One chip per
+                    EffectUnit — its numeric modifier rides in the tooltip, so
+                    "Splash I" and "+25% Splash" no longer show as two rows. */}
+                {sec.length === 0 && ab.length === 0 ? (
+                  <td class="cell is-empty"><span class="cell__dash">—</span></td>
+                ) : (
+                  <td class="cell cell--effects">
+                    <div class="uname__meta">
+                      {ab.map((a: any) => (
+                        <a class="chip chip--ability" href={`${base}abilities/${a.slug}`}
+                           data-tip-title={a.label} data-tip={JSON.stringify(a.lines || [])}>
+                          {a.icon && (
+                            <img class="chip__icon" src={`${base}img/icons/${a.icon}.png`} alt="" onerror="this.style.display='none'" />
+                          )}
+                          {a.label}
+                        </a>
+                      ))}
+                      {sec.map((t: string) => <span class="chip chip--neutral" title="Unit trait">{t}</span>)}
+                    </div>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="application/json" id="unit-search-blobs" set:html={JSON.stringify(searchBlobs)}></script>
+  <script is:inline define:vars={{ FACET_ATTR_JSON: JSON.stringify({ nation: 'data-nation', class: 'data-class' }) }}>
+    (function () {
+      const input = document.getElementById('site-search');
+      const blobNode = document.getElementById('unit-search-blobs');
+      const grid = document.getElementById('units-grid');
+      const note = document.getElementById('grid-searchnote');
+      const toggle = document.getElementById('unit-picker-toggle');
+      const picker = document.getElementById('unit-picker');
+      const visibleCount = document.getElementById('unit-visible-count');
+      if (!blobNode || !grid || !picker) return;
+      let blobs;
+      try { blobs = JSON.parse(blobNode.textContent || '{}'); } catch { return; }
+
+      const FACET_ATTR = JSON.parse(FACET_ATTR_JSON);
+      const rows = Array.from(grid.querySelectorAll('tr[data-line]'));
+      const cbs = Array.from(picker.querySelectorAll('.nation-picker__cb'));
+      const picked = {};
+      function syncPicked() {
+        for (const k of Object.keys(FACET_ATTR)) picked[k] = new Set();
+        cbs.forEach((cb) => { if (cb.checked) picked[cb.getAttribute('data-facet')].add(cb.value); });
+      }
+      function rowPasses(row) {
+        for (const facet of Object.keys(FACET_ATTR)) {
+          if (!picked[facet].has(row.getAttribute(FACET_ATTR[facet]) || '')) return false;
+        }
+        return true;
+      }
+      function applyFilters() {
+        syncPicked();
+        const q = ((input && input.value) || '').trim().toLowerCase();
+        let visibleN = 0, hiddenBySearch = 0;
+        for (const row of rows) {
+          const slug = row.getAttribute('data-line');
+          const matchesSearch = !q || (blobs[slug] || '').includes(q);
+          const visible = matchesSearch && rowPasses(row);
+          if (visible) visibleN++;
+          if (!matchesSearch) hiddenBySearch++;
+          row.classList.toggle('is-hidden', !visible);
+        }
+        if (visibleCount) visibleCount.textContent = String(visibleN);
+        if (note) {
+          if (q && hiddenBySearch > 0) {
+            note.hidden = false;
+            note.textContent = 'Showing ' + (rows.length - hiddenBySearch) + ' of ' + rows.length +
+              ' unique unit lines matching "' + (input ? input.value : '') + '"';
+          } else { note.hidden = true; note.textContent = ''; }
+        }
+      }
+
+      if (input) input.addEventListener('input', applyFilters);
+      if (toggle) {
+        toggle.addEventListener('click', () => {
+          const open = !picker.hidden;
+          picker.hidden = open;
+          toggle.setAttribute('aria-expanded', String(!open));
+        });
+        document.addEventListener('click', (e) => {
+          if (picker.hidden) return;
+          if (picker.contains(e.target) || toggle.contains(e.target)) return;
+          picker.hidden = true; toggle.setAttribute('aria-expanded', 'false');
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !picker.hidden) {
+            picker.hidden = true; toggle.setAttribute('aria-expanded', 'false'); toggle.focus();
+          }
+        });
+      }
+      cbs.forEach((cb) => cb.addEventListener('change', applyFilters));
+      picker.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pick]');
+        if (!btn) return;
+        const action = btn.getAttribute('data-pick');
+        if (action === 'all') { cbs.forEach((cb) => (cb.checked = true)); applyFilters(); }
+        else if (action === 'none') { cbs.forEach((cb) => (cb.checked = false)); applyFilters(); }
+        else if (action === 'close') {
+          picker.hidden = true;
+          if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+      applyFilters();
+    })();
+  </script>
+  <script is:inline>
+    (function () {
+      const table = document.querySelector('#units-grid table.ntbl');
+      if (!table || !table.tHead) return;
+      const ths = Array.from(table.tHead.rows[0].cells);
+      ths.forEach((th, ci) => {
+        th.classList.add('is-sortable');
+        th.addEventListener('click', () => {
+          const tb = table.tBodies[0];
+          const rows = Array.from(tb.rows);
+          const asc = th.getAttribute('aria-sort') !== 'ascending';
+          ths.forEach(h => h.removeAttribute('aria-sort'));
+          th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+          const val = r => {
+            const c = r.cells[ci];
+            const sv = c && c.getAttribute && c.getAttribute('data-sortval');
+            const t = (sv != null ? sv : (c ? c.textContent : '')).trim();
+            const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+            return { t, n: (t && !isNaN(n)) ? n : null };
+          };
+          rows.sort((a, b) => {
+            const ka = val(a), kb = val(b);
+            let r;
+            if (ka.n !== null && kb.n !== null) r = ka.n - kb.n;
+            else if (ka.n !== null) r = -1;
+            else if (kb.n !== null) r = 1;
+            else r = ka.t.localeCompare(kb.t);
+            return asc ? r : -r;
+          });
+          rows.forEach(r => tb.appendChild(r));
+        });
+      });
+    })();
+  </script>
+  <script is:inline>
+    (function () {
+      // Custom floating tooltip for ability chips. A single fixed-position node
+      // so it never gets clipped by the table's horizontal scroll container.
+      const grid = document.getElementById('units-grid');
+      if (!grid) return;
+      const tip = document.createElement('div');
+      tip.className = 'abil-tip';
+      tip.hidden = true;
+      document.body.appendChild(tip);
+
+      function show(chip) {
+        let lines = [];
+        try { lines = JSON.parse(chip.getAttribute('data-tip') || '[]'); } catch {}
+        const title = chip.getAttribute('data-tip-title') || '';
+        tip.innerHTML = '';
+        const h = document.createElement('div');
+        h.className = 'abil-tip__title';
+        h.textContent = title;
+        tip.appendChild(h);
+        if (lines.length) {
+          const ul = document.createElement('ul');
+          ul.className = 'abil-tip__list';
+          for (const l of lines) {
+            const li = document.createElement('li');
+            li.textContent = l;
+            ul.appendChild(li);
+          }
+          tip.appendChild(ul);
+        }
+        const hint = document.createElement('div');
+        hint.className = 'abil-tip__hint';
+        hint.textContent = 'Click for details →';
+        tip.appendChild(hint);
+
+        tip.hidden = false;
+        const r = chip.getBoundingClientRect();
+        const tr = tip.getBoundingClientRect();
+        let top = r.bottom + 8;
+        if (top + tr.height > window.innerHeight - 8) top = r.top - tr.height - 8;
+        let left = r.left;
+        if (left + tr.width > window.innerWidth - 8) left = window.innerWidth - tr.width - 8;
+        tip.style.top = Math.max(8, top) + 'px';
+        tip.style.left = Math.max(8, left) + 'px';
+      }
+      function hide() { tip.hidden = true; }
+
+      grid.addEventListener('mouseover', (e) => {
+        const chip = e.target.closest('.chip--ability');
+        if (chip) show(chip);
+      });
+      grid.addEventListener('mouseout', (e) => {
+        const chip = e.target.closest('.chip--ability');
+        if (chip && !chip.contains(e.relatedTarget)) hide();
+      });
+      grid.addEventListener('focusin', (e) => {
+        const chip = e.target.closest('.chip--ability');
+        if (chip) show(chip);
+      });
+      grid.addEventListener('focusout', hide);
+      grid.addEventListener('scroll', hide, true);
+      window.addEventListener('scroll', hide, true);
+    })();
+  </script>
+</Base>
+
+<!-- Tooltip is appended to <body> by JS, so its styles must be global (Astro
+     scopes <style> by default and the scoped selector would never match it). -->
+<style is:global>
+  .abil-tip { position: fixed; z-index: 60; max-width: 22rem; padding: 0.6rem 0.75rem;
+    background: var(--bg-elev-2); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); pointer-events: none; }
+  .abil-tip[hidden] { display: none; }
+  .abil-tip__title { font-family: var(--font-display); font-weight: 600; font-size: 0.85rem; color: var(--accent);
+    margin-bottom: 0.35rem; }
+  .abil-tip__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+  .abil-tip__list li { font-size: 0.78rem; color: var(--text); padding-left: 0.7rem; position: relative; line-height: 1.3; }
+  .abil-tip__list li::before { content: '▸'; position: absolute; left: 0; color: var(--accent); opacity: 0.7; }
+  .abil-tip__hint { margin-top: 0.4rem; font-size: 0.68rem; color: var(--text-faint); font-family: var(--font-mono); }
+</style>
+
+<style>
+  .utbl__name-col   { width: 17rem; }
+  .utbl__nation-col { width: 8rem; }
+  .utbl__tier-col   { width: 9rem; }
+  .utbl__class-col  { width: 7rem; }
+  .utbl__stat-col   { width: 4.5rem; }
+  .utbl__cost-col   { width: 7rem; }
+  .utbl__mat-col    { width: 7rem; }
+  .utbl__abil-col   { width: auto; }
+
+  .nhdr--col {
+    background: var(--bg-elev-2);
+    color: var(--text);
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.18));
+    border-bottom: 2px solid var(--border-strong);
+    text-align: left;
+    padding: 0.45rem 0.55rem;
+  }
+  .nhdr__name { font-family: var(--font-display); font-size: 0.78rem; letter-spacing: 0.03em; display: inline-flex; align-items: center; gap: 0.3rem; }
+  .nhdr.is-sortable, .rowlabel--corner.is-sortable { cursor: pointer; user-select: none; }
+  .nhdr.is-sortable:hover, .rowlabel--corner.is-sortable:hover { filter: brightness(1.12); }
+  .nhdr.is-sortable .nhdr__name::after,
+  .rowlabel--corner.is-sortable .nhdr__name::after { content: '↕'; opacity: 0.35; margin-left: 0.25rem; font-size: 0.85em; }
+  .nhdr[aria-sort='ascending'] .nhdr__name::after,
+  .rowlabel--corner[aria-sort='ascending'] .nhdr__name::after { content: '↑'; opacity: 0.9; }
+  .nhdr[aria-sort='descending'] .nhdr__name::after,
+  .rowlabel--corner[aria-sort='descending'] .nhdr__name::after { content: '↓'; opacity: 0.9; }
+  .nhdr--num { text-align: right; }
+  .nhdr--num .nhdr__name { justify-content: flex-end; }
+
+  .rowlabel--unit { padding: 0.4rem 0.6rem; text-align: left; background: var(--bg-elev); }
+  .uname { display: flex; gap: 0.5rem; align-items: center; }
+  .uname__art { width: 44px; height: 44px; object-fit: contain; flex-shrink: 0; border-radius: 6px; background: rgba(0,0,0,0.25); }
+  .uname__arts { display: flex; flex-shrink: 0; }
+  .uname__arts .uname__art--sm { width: 34px; height: 34px; }
+  .uname__arts .uname__art--sm + .uname__art--sm { margin-left: -10px; box-shadow: -2px 0 4px rgba(0,0,0,0.4); }
+  .numval__dim { color: var(--text-faint); font-weight: 500; }
+  .uname__text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+  .uname__name { display: flex; flex-direction: column; font-family: var(--font-display); font-weight: 600; font-size: 0.9rem; color: var(--text); letter-spacing: 0.02em; line-height: 1.25; }
+  .uname__line { display: block; }
+  .uname__meta { display: flex; gap: 0.25rem; flex-wrap: wrap; align-items: center; margin-top: 0.15rem; }
+
+  .cell--nation { background: var(--bg-elev);
+    background-image: linear-gradient(90deg, color-mix(in srgb, var(--nation-ingame, transparent) 30%, transparent), transparent 65%);
+    box-shadow: inset 3px 0 0 var(--nation-ingame, transparent); }
+  .nat-tag { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--text-dim); text-decoration: none; }
+  .nat-tag:hover { color: var(--accent); }
+  .nat-tag:hover .nat-tag__txt { text-decoration: underline; }
+  .nat-tag__crest { width: 20px; height: 20px; object-fit: contain; }
+
+  .cell--tier { background: var(--bg-elev); background-image: none; }
+  .era-tag { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--text-dim); }
+  .era-tag__ico { width: 18px; height: 18px; object-fit: contain; }
+
+  .cell--class { background: var(--bg-elev); background-image: none; }
+  .cls-tag { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--text-dim); }
+  .cls-tag__ico { width: 18px; height: 18px; object-fit: contain; }
+
+  .cell--num { text-align: right; padding: 0.3rem 0.55rem; background-image: none; }
+  .cell--num.is-empty { background: var(--bg-elev); }
+  .numval { display: inline-flex; align-items: center; gap: 0.3rem; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.84rem; justify-content: flex-end; }
+  .numval--str { color: var(--accent); }
+  .numval__ico { width: 14px; height: 14px; object-fit: contain; flex-shrink: 0; }
+
+  .cell--chips { padding: 0.3rem 0.45rem; }
+  .cell--chips .chip { margin: 0.1rem 0.15rem 0.1rem 0; }
+  .chip__icon { width: 13px; height: 13px; object-fit: contain; vertical-align: -2px; margin-right: 2px; }
+  .chip--dlc { background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--border); padding: 0.05rem 0.4rem; font-size: 0.64rem; letter-spacing: 0.06em; font-family: var(--font-mono); text-transform: uppercase; }
+  .chip--neutral { background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--border); padding: 0.05rem 0.4rem; font-size: 0.68rem; }
+  .chip--ability { display: inline-flex; align-items: center; gap: 2px; background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev-2)); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); padding: 0.05rem 0.4rem; font-size: 0.68rem; font-weight: 600; text-decoration: none; cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+  .chip--ability:hover { background: color-mix(in srgb, var(--accent) 28%, var(--bg-elev-2)); border-color: var(--accent); }
+
+  .nation-picker--facets { max-height: 70vh; overflow-y: auto; min-width: 15rem; }
+  .facet + .facet { margin-top: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+  .facet__title { font-family: var(--font-display); font-size: 0.72rem; letter-spacing: 0.06em; color: var(--text-faint); margin: 0 0 0.2rem; padding-left: 0.6rem; }
+  .nation-picker__count { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.72rem; color: var(--text-faint); }
+
+  tr.is-hidden { display: none; }
+</style>
