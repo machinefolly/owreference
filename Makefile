@@ -69,6 +69,7 @@ data:
 	@python3 scripts/build_culture.py
 	@python3 scripts/build_entities.py
 	@python3 scripts/build_backlinks.py
+	@python3 scripts/build_obs_data.py
 
 changelog:
 	@python3 scripts/changelog.py
